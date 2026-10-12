@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Rent Manager
 
-## Getting Started
+Rooms, tenants, rent collection, payments and building expenses for a small rental building.
+Next.js 15 · TypeORM + plain PostgreSQL · Auth.js (credentials, JWT) · Tailwind · Recharts.
 
-First, run the development server:
+## Run locally (no Docker)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Install Postgres (e.g. `brew install postgresql@18 && brew services start postgresql@18`) and create a DB:
+   ```bash
+   createdb rent_manager
+   ```
+2. Configure env — copy `.env.example` to `.env.local` and fill in:
+   - `DATABASE_URL=postgres://<you>@localhost:5432/rent_manager`
+   - `AUTH_SECRET` (`openssl rand -base64 32`), `CRON_SECRET`
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — the first admin created by the seed
+3. ```bash
+   npm install
+   npm run migration:run   # create tables
+   npm run seed            # 2 floors, 13 rooms (6×₹6,500, 5×₹7,000, 2×₹8,000), categories, admin
+   npm run dev
+   ```
+4. Open http://localhost:3000 and sign in. Assign the real rent to each room on **Rooms → Change rent**.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Other scripts: `npm test` (billing unit tests), `npm run build`, `npm run migration:generate -- src/server/migrations/Name`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## How it works
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Money** is whole rupees (`int`); **months** are `YYYY-MM`; dates are `date` (no timezone drift). Dates use Asia/Kolkata.
+- **Rent history is never rewritten.** Changing a room's rent adds a `room_rent_history` row with an effective date; each month's charge is created once and keeps the amount it was created with. A tenancy follows its room's rent unless a custom rent is set.
+- **Charges** are generated lazily on every page load (`ensureCharges`) and by `POST /api/cron/generate-charges`, so a missed cron is harmless. First/last month are pro-rated (toggle in Settings).
+- **Payments** apply to the chosen month or the oldest unpaid one; overflow becomes advance credit and settles future charges automatically.
+- **Roles:** `ADMIN` can do everything. `STAFF` can record payments/expenses, add tenants/rooms and check-in/out, but cannot delete, change rents, or open Settings (enforced in server actions, not just hidden in the UI).
+- Business logic lives in `src/server/services/*` (framework-agnostic); server actions in `src/actions/*` only validate (zod) and check roles.
 
-## Learn More
+## Deploy on Vercel (free)
 
-To learn more about Next.js, take a look at the following resources:
+1. Push the repo to GitHub and import it in Vercel.
+2. **Storage tab → Create → Postgres (Neon via Marketplace).** It injects `DATABASE_URL` (use the pooled string). Add `DB_SSL=true`.
+3. Add env vars `AUTH_SECRET`, `CRON_SECRET`, and (first deploy only) `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
+4. Deploy — the `vercel-build` script runs migrations before building. Run the seed once against the production DB:
+   ```bash
+   DATABASE_URL='<prod url>' DB_SSL=true ADMIN_EMAIL=… ADMIN_PASSWORD=… npm run seed
+   ```
+5. `vercel.json` registers a monthly cron for the charge job (Vercel sends `Authorization: Bearer $CRON_SECRET`).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Migrating to AWS / Render / a VPS
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Nothing here is Vercel-specific.
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Database:** `pg_dump -Fc "$OLD_URL" > rm.dump` → `pg_restore --no-owner -d "$RDS_URL" rm.dump`. Set `DATABASE_URL` (and `DB_SSL=true` for RDS).
+2. **App:** `docker build -t rent-manager .` and run it on App Runner / ECS / Lightsail / any VPS with `DATABASE_URL`, `DB_SSL`, `AUTH_SECRET`, `CRON_SECRET`, `AUTH_TRUST_HOST=true`. Run `npm run migration:run` from CI or a one-off task for schema changes.
+3. **Cron:** an EventBridge rule (or any cron) calling
+   `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://your-host/api/cron/generate-charges`.
+4. **Attachments:** expenses/tenants store plain links today; to host files add an S3 adapter behind a small `storage.ts` interface.

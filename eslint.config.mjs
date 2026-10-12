@@ -12,6 +12,13 @@ const compat = new FlatCompat({
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
+    rules: {
+      // Query rows are untyped SQL results; CSV exports are plain downloads.
+      "@typescript-eslint/no-explicit-any": "off",
+      "@next/next/no-html-link-for-pages": "off",
+    },
+  },
+  {
     ignores: [
       "node_modules/**",
       ".next/**",
