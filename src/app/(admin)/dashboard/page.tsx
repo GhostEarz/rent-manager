@@ -3,6 +3,7 @@ import { CollectionChart, ExpenseDonut, TrendChart } from "@/components/Charts";
 import { PaymentDialog } from "@/components/forms";
 import { MonthPicker } from "@/components/MonthPicker";
 import { Badge, Empty, PageHeader, Stat } from "@/components/ui";
+import { activeHouseId } from "@/lib/house";
 import { fmtDate, fmtMonth, rupees, waLink } from "@/lib/format";
 import { currentMonth } from "@/server/services/common";
 import * as Q from "@/server/services/queries";
@@ -17,14 +18,16 @@ const tileTone: Record<string, string> = {
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const month = (await searchParams).month?.match(/^\d{4}-\d{2}$/)?.[0] ?? currentMonth();
+  const houseId = (await activeHouseId()) ?? undefined;
   const [k, tiles, trend, cats, late, pays, exps, options] = await Promise.all([
-    Q.kpis(month), Q.roomTiles(month), Q.trend(month), Q.expensesByCategory(month), Q.overdue(),
+    Q.kpis(month, houseId), Q.roomTiles(month, houseId), Q.trend(month), Q.expensesByCategory(month), Q.overdue(),
     Q.recentPayments(), Q.recentExpenses(), Q.activeTenancyOptions(),
   ]);
   const floors = [...new Set(tiles.map((t) => t.floorNumber))];
   return (
     <>
       <PageHeader title="Dashboard" sub={fmtMonth(month)}>
+        <Link className="btn btn-sm no-print" href={`/analytics?month=${month}`}>Full analytics →</Link>
         <MonthPicker value={month} />
         <PaymentDialog options={options as never} />
       </PageHeader>
@@ -33,9 +36,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <Stat label="Expected rent" value={rupees(k.expected)} />
         <Stat label="Collected" value={rupees(k.collected)} tone="good" />
         <Stat label="Pending" value={rupees(k.pending)} tone={k.pending > 0 ? "bad" : undefined} />
-        <Stat label="Occupancy" value={`${k.occupied}/${k.totalRooms}`} />
+        <Stat label="Occupancy (monthly)" value={`${k.occupied}/${k.totalRooms}`} />
         <Stat label="Expenses" value={rupees(k.expenses)} />
         <Stat label="Net income" value={rupees(k.net)} tone={k.net >= 0 ? "good" : "bad"} sub={`Received ${rupees(k.received)}`} />
+        {k.dailyReceived > 0 && <Stat label="Daily stay revenue" value={rupees(k.dailyReceived)} tone="good" sub="This month" />}
       </div>
 
       <section className="mt-6">

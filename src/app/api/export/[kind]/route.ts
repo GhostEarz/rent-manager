@@ -1,7 +1,8 @@
 import { auth } from "@/lib/auth";
 import { toCsv } from "@/lib/csv";
+import * as A from "@/server/services/analytics";
 import * as Q from "@/server/services/queries";
-import { today } from "@/server/services/common";
+import { currentMonth, today } from "@/server/services/common";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +29,32 @@ export async function GET(req: Request, { params }: { params: Promise<{ kind: st
     case "defaulters":
       rows = (await Q.defaulters()).map((r) => ({ room: r.roomNumber, tenant: r.name, phone: r.phone, owed: r.owed, oldestDue: r.oldestDue, daysOverdue: r.daysOverdue }));
       break;
+    case "analytics-summary": {
+      const f = analyticsFilterFrom(sp);
+      const s = await A.analyticsSummary(f);
+      rows = [{ from: f.from, to: f.to, ...s }];
+      break;
+    }
+    case "revenue-by-house":
+      rows = await A.revenueByHouse(analyticsFilterFrom(sp));
+      break;
+    case "room-performance":
+      rows = await A.roomPerformance(analyticsFilterFrom(sp)) as unknown as Record<string, unknown>[];
+      break;
     default: return new Response("Not found", { status: 404 });
   }
   return new Response(toCsv(rows), {
     headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="${kind}-${today()}.csv"` },
+  });
+}
+
+function analyticsFilterFrom(sp: URLSearchParams): A.AnalyticsFilter {
+  const month = sp.get("month")?.match(/^\d{4}-\d{2}$/)?.[0] ?? currentMonth();
+  const num = (k: string) => (sp.get(k) ? Number(sp.get(k)) : undefined);
+  const rentalType = sp.get("rentalType");
+  return A.monthFilter(month, {
+    locationId: num("locationId"),
+    houseId: num("houseId"),
+    rentalType: rentalType === "MONTHLY" || rentalType === "DAILY" ? rentalType : undefined,
   });
 }

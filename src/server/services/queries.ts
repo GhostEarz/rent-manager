@@ -188,27 +188,50 @@ export const openCharges = (tenancyId: number) =>
 
 // ---- dashboard ----------------------------------------------------------------
 
-export async function kpis(month: string) {
+export async function kpis(month: string, houseId?: number) {
+  const scope = houseId ? `AND r."houseId" = $2` : "";
   const [rent] = await q(
-    `SELECT COALESCE(SUM(c."amountDue"),0)::int AS expected, COALESCE(SUM(${PAID}),0)::int AS collected FROM rent_charges c WHERE c.month = $1`,
-    [month],
+    `SELECT COALESCE(SUM(c."amountDue"),0)::int AS expected, COALESCE(SUM(${PAID}),0)::int AS collected
+       FROM rent_charges c JOIN tenancies y ON y.id = c."tenancyId" JOIN rooms r ON r.id = y."roomId"
+      WHERE c.month = $1 ${scope}`,
+    houseId ? [month, houseId] : [month],
   );
-  const [recv] = await q(`SELECT COALESCE(SUM(amount),0)::int AS received FROM payments WHERE to_char("paidOn",'YYYY-MM') = $1`, [month]);
-  const [exp] = await q(`SELECT COALESCE(SUM(amount),0)::int AS expenses FROM expenses WHERE "billMonth" = $1`, [month]);
-  const [occ] = await q(`SELECT COUNT(*) FILTER (WHERE status = 'OCCUPIED')::int AS occupied, COUNT(*)::int AS total FROM rooms`);
+  const [recv] = await q(
+    `SELECT COALESCE(SUM(p.amount),0)::int AS received FROM payments p JOIN tenancies y ON y.id = p."tenancyId" JOIN rooms r ON r.id = y."roomId"
+      WHERE to_char(p."paidOn",'YYYY-MM') = $1 ${scope}`,
+    houseId ? [month, houseId] : [month],
+  );
+  const [dailyRecv] = await q(
+    `SELECT COALESCE(SUM(sp.amount),0)::int AS received FROM stay_payments sp JOIN stays s ON s.id = sp."stayId" JOIN rooms r ON r.id = s."roomId"
+      WHERE to_char(sp."paidOn",'YYYY-MM') = $1 ${scope}`,
+    houseId ? [month, houseId] : [month],
+  );
+  const [exp] = await q(
+    `SELECT COALESCE(SUM(e.amount),0)::int AS expenses FROM expenses e LEFT JOIN rooms r ON r.id = e."roomId"
+      WHERE e."billMonth" = $1 ${houseId ? `AND (r.id IS NULL OR r."houseId" = $2)` : ""}`,
+    houseId ? [month, houseId] : [month],
+  );
+  const [occ] = await q(
+    `SELECT COUNT(*) FILTER (WHERE status = 'OCCUPIED' AND "rentalType" = 'MONTHLY')::int AS occupied,
+            COUNT(*) FILTER (WHERE "rentalType" = 'MONTHLY')::int AS total
+       FROM rooms ${houseId ? `WHERE "houseId" = $1` : ""}`,
+    houseId ? [houseId] : [],
+  );
+  const received = (recv.received as number) + (dailyRecv.received as number);
   return {
     expected: rent.expected as number,
     collected: rent.collected as number,
     pending: (rent.expected - rent.collected) as number,
-    received: recv.received as number,
+    received,
+    dailyReceived: dailyRecv.received as number,
     expenses: exp.expenses as number,
-    net: (recv.received - exp.expenses) as number,
+    net: (received - exp.expenses) as number,
     occupied: occ.occupied as number,
     totalRooms: occ.total as number,
   };
 }
 
-export async function roomTiles(month: string) {
+export async function roomTiles(month: string, houseId?: number) {
   return q(`
     SELECT r.id, r.number, r."floorId", f.number AS "floorNumber", f.name AS "floorName", r.status AS "roomStatus",
            t.name AS "tenantName", t.id AS "tenantId", c."amountDue", ${PAID} AS paid, c.status AS "chargeStatus"
@@ -216,10 +239,11 @@ export async function roomTiles(month: string) {
       LEFT JOIN tenancies y ON y."roomId" = r.id
       LEFT JOIN rent_charges c ON c."tenancyId" = y.id AND c.month = $1
       LEFT JOIN tenants t ON t.id = y."tenantId"
-     WHERE c.id IS NOT NULL OR NOT EXISTS (
+     WHERE (c.id IS NOT NULL OR NOT EXISTS (
             SELECT 1 FROM tenancies y2 JOIN rent_charges c2 ON c2."tenancyId" = y2.id
-             WHERE y2."roomId" = r.id AND c2.month = $1)
-     ORDER BY f.number, r.number`, [month]);
+             WHERE y2."roomId" = r.id AND c2.month = $1))
+       ${houseId ? `AND r."houseId" = $2` : ""}
+     ORDER BY f.number, r.number`, houseId ? [month, houseId] : [month]);
 }
 
 export async function trend(month: string) {

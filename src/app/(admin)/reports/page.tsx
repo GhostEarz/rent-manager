@@ -17,6 +17,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader title="Reports" sub={`Year ${year}`}>
+        <Link className="btn btn-sm no-print" href="/analytics">Full analytics →</Link>
         <Link className="btn" href={`/reports?year=${year - 1}`}>← {year - 1}</Link>
         {year < thisYear && <Link className="btn" href={`/reports?year=${year + 1}`}>{year + 1} →</Link>}
         <PrintButton />
