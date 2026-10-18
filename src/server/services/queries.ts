@@ -45,6 +45,46 @@ export interface RentRow {
   status: "PAID" | "PARTIAL" | "UNPAID"; dueDate: string;
 }
 
+export interface MonthlyReceiptPaymentLine {
+  paidOn: string;
+  method: string;
+  referenceNo: string | null;
+  amount: number;
+}
+
+export interface MonthlyReceiptRow extends RentRow {
+  payments: MonthlyReceiptPaymentLine[];
+}
+
+export async function monthlyReceiptRows(month: string): Promise<MonthlyReceiptRow[]> {
+  const rows = await q<
+    RentRow & { payments: MonthlyReceiptPaymentLine[] | string }
+  >(
+    `SELECT c.id AS "chargeId", c."tenancyId", t.id AS "tenantId", t.name AS "tenantName", t.phone,
+            r.number AS "roomNumber", r.id AS "roomId", c.month, c."amountDue", ${PAID} AS paid,
+            (c."amountDue" - ${PAID}) AS balance, c.status, c."dueDate",
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'paidOn', p."paidOn", 'method', p.method, 'referenceNo', p."referenceNo", 'amount', a.amount
+              ) ORDER BY p."paidOn", p.id)
+              FROM payment_allocations a
+              JOIN payments p ON p.id = a."paymentId"
+              WHERE a."chargeId" = c.id
+            ), '[]'::json) AS payments
+       FROM rent_charges c
+       JOIN tenancies y ON y.id = c."tenancyId"
+       JOIN tenants t ON t.id = y."tenantId"
+       JOIN rooms r ON r.id = y."roomId"
+      WHERE c.month = $1
+      ORDER BY r.number`,
+    [month],
+  );
+  return rows.map((r) => ({
+    ...r,
+    payments: Array.isArray(r.payments) ? r.payments : [],
+  }));
+}
+
 export async function rentTable(month: string, status?: string): Promise<RentRow[]> {
   const rows = await q<RentRow>(
     `SELECT c.id AS "chargeId", c."tenancyId", t.id AS "tenantId", t.name AS "tenantName", t.phone,
