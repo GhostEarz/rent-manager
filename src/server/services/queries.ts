@@ -10,32 +10,104 @@ async function q<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
 
 const PAID = `COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a."chargeId" = c.id), 0)::int`;
 
+// ---- locations / houses ------------------------------------------------------
+
+export const listLocations = () => q(`SELECT id, name, notes FROM locations ORDER BY name`);
+
+export const listHouses = (locationId?: number) =>
+  q(
+    `SELECT h.id, h."locationId", h.name, h.address, h.active, l.name AS "locationName"
+       FROM houses h JOIN locations l ON l.id = h."locationId"
+      ${locationId ? `WHERE h."locationId" = $1` : ""} ORDER BY l.name, h.name`,
+    locationId ? [locationId] : [],
+  );
+
+export const houseOptions = () =>
+  q(`SELECT h.id, h.name, l.name AS "locationName" FROM houses h JOIN locations l ON l.id = h."locationId" WHERE h.active ORDER BY l.name, h.name`);
+
 // ---- rooms ------------------------------------------------------------------
 
 export interface RoomRow {
   id: number; number: string; floorId: number; floorNumber: number; floorName: string;
+  houseId: number; houseName: string; rentalType: "MONTHLY" | "DAILY";
   currentRent: number; status: string; notes: string | null;
   tenantName: string | null; tenancyId: number | null; tenantId: number | null;
 }
 
-export async function listRooms(): Promise<RoomRow[]> {
+export async function listRooms(houseId?: number): Promise<RoomRow[]> {
   return q(`
     SELECT r.id, r.number, r."floorId", f.number AS "floorNumber", f.name AS "floorName",
+           r."houseId", h.name AS "houseName", r."rentalType",
            r."currentRent", r.status, r.notes,
            t.name AS "tenantName", y.id AS "tenancyId", t.id AS "tenantId"
-      FROM rooms r JOIN floors f ON f.id = r."floorId"
+      FROM rooms r JOIN floors f ON f.id = r."floorId" JOIN houses h ON h.id = r."houseId"
       LEFT JOIN tenancies y ON y."roomId" = r.id AND y.status = 'ACTIVE'
       LEFT JOIN tenants t ON t.id = y."tenantId"
-     ORDER BY f.number, r.number`);
+     ${houseId ? `WHERE r."houseId" = $1` : ""}
+     ORDER BY f.number, r.number`, houseId ? [houseId] : []);
 }
 
-export const listFloors = () => q(`SELECT id, number, name FROM floors ORDER BY number`);
+export const listFloors = (houseId?: number) =>
+  q(`SELECT id, number, name, "houseId" FROM floors ${houseId ? `WHERE "houseId" = $1` : ""} ORDER BY number`, houseId ? [houseId] : []);
 
 export const roomRentHistory = (roomId: number) =>
-  q(`SELECT id, rent, "effectiveFrom" FROM room_rent_history WHERE "roomId" = $1 ORDER BY "effectiveFrom" DESC, id DESC`, [roomId]);
+  q(`SELECT id, rent, "rentalType", "effectiveFrom" FROM room_rent_history WHERE "roomId" = $1 ORDER BY "effectiveFrom" DESC, id DESC`, [roomId]);
 
-export const vacantRooms = () =>
-  q(`SELECT r.id, r.number, r."currentRent" FROM rooms r WHERE r.status = 'VACANT' ORDER BY r.number`);
+/** Vacant rooms available for a new monthly tenancy (daily rooms use stays instead). */
+export const vacantRooms = (houseId?: number) =>
+  q(
+    `SELECT r.id, r.number, r."currentRent" FROM rooms r
+      WHERE r.status = 'VACANT' AND r."rentalType" = 'MONTHLY' ${houseId ? `AND r."houseId" = $1` : ""}
+      ORDER BY r.number`,
+    houseId ? [houseId] : [],
+  );
+
+/** Vacant daily rooms available for a new guest stay. */
+export const vacantDailyRooms = (houseId?: number) =>
+  q(
+    `SELECT r.id, r.number, r."currentRent" AS "dailyRate" FROM rooms r
+      WHERE r.status = 'VACANT' AND r."rentalType" = 'DAILY' ${houseId ? `AND r."houseId" = $1` : ""}
+      ORDER BY r.number`,
+    houseId ? [houseId] : [],
+  );
+
+// ---- stays (daily rentals) -----------------------------------------------------
+
+export interface StayRow {
+  id: number; roomId: number; roomNumber: string; houseId: number; houseName: string;
+  guestName: string; phone: string | null; checkIn: string; checkOut: string | null;
+  dailyRate: number; status: "ACTIVE" | "ENDED" | "CANCELLED";
+  nights: number; amountDue: number; paid: number; balance: number;
+}
+
+const STAY_NIGHTS = `GREATEST(0, (COALESCE(s."checkOut", CURRENT_DATE) - s."checkIn"))::int`;
+const STAY_PAID = `COALESCE((SELECT SUM(amount) FROM stay_payments WHERE "stayId" = s.id), 0)::int`;
+
+export async function listStays(opts: { houseId?: number; status?: string } = {}): Promise<StayRow[]> {
+  const w: string[] = []; const p: unknown[] = [];
+  const add = (sql: string, v: unknown) => { p.push(v); w.push(sql.replace("?", `$${p.length}`)); };
+  if (opts.houseId) add(`r."houseId" = ?`, opts.houseId);
+  if (opts.status) add(`s.status = ?`, opts.status);
+  const rows = await q<StayRow & { amountDue: string | number }>(`
+    SELECT s.id, s."roomId", r.number AS "roomNumber", r."houseId", h.name AS "houseName",
+           s."guestName", s.phone, s."checkIn", s."checkOut", s."dailyRate", s.status,
+           ${STAY_NIGHTS} AS nights, (s."dailyRate" * ${STAY_NIGHTS})::int AS "amountDue",
+           ${STAY_PAID} AS paid, (s."dailyRate" * ${STAY_NIGHTS} - ${STAY_PAID})::int AS balance
+      FROM stays s JOIN rooms r ON r.id = s."roomId" JOIN houses h ON h.id = r."houseId"
+      ${w.length ? "WHERE " + w.join(" AND ") : ""}
+     ORDER BY (s.status = 'ACTIVE') DESC, s."checkIn" DESC`, p);
+  return rows;
+}
+
+export async function stayDetail(id: number) {
+  const [stay] = await listStays().then((rows) => rows.filter((r) => r.id === id));
+  if (!stay) return null;
+  const payments = await q(
+    `SELECT id, amount, "paidOn", method, "referenceNo", note FROM stay_payments WHERE "stayId" = $1 ORDER BY "paidOn", id`,
+    [id],
+  );
+  return { stay, payments };
+}
 
 // ---- rent collection ----------------------------------------------------------
 

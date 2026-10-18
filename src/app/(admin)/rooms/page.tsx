@@ -1,7 +1,8 @@
-import { addFloorAction, addRoomAction, changeRentAction, deleteFloorAction, deleteRoomAction, updateFloorAction, updateRoomAction } from "@/actions/rooms";
+import { addFloorAction, addRoomAction, changeRentAction, changeRentalTypeAction, deleteFloorAction, deleteRoomAction, updateFloorAction, updateRoomAction } from "@/actions/rooms";
 import { ActionForm, ConfirmAction } from "@/components/ActionForm";
 import { Modal } from "@/components/Modal";
 import { Badge, Field, PageHeader, Row, todayStr } from "@/components/ui";
+import { activeHouseId } from "@/lib/house";
 import { fmtDate, rupees } from "@/lib/format";
 import { requireUser } from "@/lib/session";
 import * as Q from "@/server/services/queries";
@@ -9,15 +10,17 @@ import * as Q from "@/server/services/queries";
 export default async function RoomsPage() {
   const user = await requireUser();
   const admin = user.role === "ADMIN";
-  const [rooms, floors] = await Promise.all([Q.listRooms(), Q.listFloors()]);
+  const houseId = (await activeHouseId()) ?? undefined;
+  const [rooms, floors] = await Promise.all([Q.listRooms(houseId), Q.listFloors(houseId)]);
   const history = Object.fromEntries(await Promise.all(rooms.map(async (r) => [r.id, await Q.roomRentHistory(r.id)] as const)));
 
   return (
     <>
       <PageHeader title="Rooms" sub={`${rooms.length} rooms on ${floors.length} floors`}>
-        {admin && (
+        {admin && houseId && (
           <Modal trigger="Add floor" title="Add floor">
             <ActionForm action={addFloorAction}>
+              <input type="hidden" name="houseId" value={houseId} />
               <Row>
                 <Field label="Number"><input name="number" type="number" required className="input" defaultValue={floors.length + 1} /></Field>
                 <Field label="Name"><input name="name" required className="input" placeholder="Floor 3" /></Field>
@@ -30,10 +33,18 @@ export default async function RoomsPage() {
             <Row>
               <Field label="Room number"><input name="number" required className="input" placeholder="108" /></Field>
               <Field label="Floor">
-                <select name="floorId" required className="input">{floors.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select>
+                <select name="floorId" required className="input">{floors.map((f: any) => <option key={f.id} value={f.id}>{f.name}</option>)}</select>
               </Field>
             </Row>
-            <Field label="Monthly rent (₹)"><input name="rent" type="number" min={1} required className="input" /></Field>
+            <Row>
+              <Field label="Rental type">
+                <select name="rentalType" className="input" defaultValue="MONTHLY">
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="DAILY">Daily</option>
+                </select>
+              </Field>
+              <Field label="Rent (₹)"><input name="rent" type="number" min={1} required className="input" /></Field>
+            </Row>
             <Field label="Notes"><input name="notes" className="input" /></Field>
           </ActionForm>
         </Modal>
@@ -68,9 +79,12 @@ export default async function RoomsPage() {
                     <p className="text-lg font-semibold">Room {r.number}</p>
                     <p className="text-sm text-muted">{r.tenantName ?? "No tenant"}</p>
                   </div>
-                  <Badge v={r.status} />
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge v={r.status} />
+                    <span className="text-[10px] font-medium uppercase text-muted">{r.rentalType === "DAILY" ? "Daily" : "Monthly"}</span>
+                  </div>
                 </div>
-                <p className="text-xl font-semibold">{rupees(r.currentRent)}<span className="text-xs font-normal text-muted"> / month</span></p>
+                <p className="text-xl font-semibold">{rupees(r.currentRent)}<span className="text-xs font-normal text-muted"> / {r.rentalType === "DAILY" ? "night" : "month"}</span></p>
                 {r.notes && <p className="text-xs text-muted">{r.notes}</p>}
                 <div className="flex flex-wrap gap-1">
                   <Modal trigger="Edit" title={`Edit room ${r.number}`} small>
@@ -101,6 +115,24 @@ export default async function RoomsPage() {
                           <Field label="New rent (₹)"><input name="rent" type="number" min={1} required defaultValue={r.currentRent} className="input" /></Field>
                           <Field label="Effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
                         </Row>
+                      </ActionForm>
+                    </Modal>
+                  )}
+                  {admin && r.status === "VACANT" && (
+                    <Modal trigger="Change rental type" title={`Change rental type — room ${r.number}`} small>
+                      <ActionForm action={changeRentalTypeAction}>
+                        <input type="hidden" name="id" value={r.id} />
+                        <p className="text-xs text-muted">Only allowed while the room is vacant. Past tenancy/stay records keep their original type and rate.</p>
+                        <Row>
+                          <Field label="Rental type">
+                            <select name="rentalType" className="input" defaultValue={r.rentalType}>
+                              <option value="MONTHLY">Monthly</option>
+                              <option value="DAILY">Daily</option>
+                            </select>
+                          </Field>
+                          <Field label={`New rate (₹)`}><input name="rent" type="number" min={1} required defaultValue={r.currentRent} className="input" /></Field>
+                        </Row>
+                        <Field label="Effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
                       </ActionForm>
                     </Modal>
                   )}
