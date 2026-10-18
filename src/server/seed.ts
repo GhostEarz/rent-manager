@@ -3,7 +3,7 @@ config({ path: [".env.local", ".env"], quiet: true });
 
 import bcrypt from "bcryptjs";
 import { getDb } from "./db/data-source";
-import { ExpenseCategory, Floor, Room, RoomRentHistory, Setting, User } from "./entities/core";
+import { ExpenseCategory, Floor, House, Location, Room, RoomRentHistory, Setting, User } from "./entities/core";
 
 // Placeholder split of the rent tiers: 6 × 6500, 5 × 7000, 2 × 8000. Re-assign in the Rooms page.
 const ROOMS: [string, number, number][] = [
@@ -17,15 +17,31 @@ const CATEGORIES = ["KSEB (Electricity)", "WiFi", "Water", "Maintenance", "Clean
 async function main() {
   const db = await getDb();
   await db.transaction(async (m) => {
-    for (const [number, name] of [[1, "Floor 1"], [2, "Floor 2"]] as const) {
-      if (!(await m.getRepository(Floor).countBy({ number }))) await m.getRepository(Floor).insert({ number, name });
+    let location = await m.getRepository(Location).findOneBy({ name: "My Building" });
+    if (!location) {
+      const res = await m.getRepository(Location).insert({ name: "My Building", notes: null });
+      location = { id: res.identifiers[0].id as number, name: "My Building", notes: null };
     }
-    const floors = await m.getRepository(Floor).find();
+    let house = await m.getRepository(House).findOneBy({ locationId: location.id });
+    if (!house) {
+      const res = await m.getRepository(House).insert({ locationId: location.id, name: "My Building", address: null, active: true });
+      house = { id: res.identifiers[0].id as number, locationId: location.id, name: "My Building", address: null, active: true } as House;
+    }
+    const houseId = house.id;
+
+    for (const [number, name] of [[1, "Floor 1"], [2, "Floor 2"]] as const) {
+      if (!(await m.getRepository(Floor).countBy({ houseId, number }))) await m.getRepository(Floor).insert({ houseId, number, name });
+    }
+    const floors = await m.getRepository(Floor).findBy({ houseId });
     for (const [number, fl, rent] of ROOMS) {
-      if (await m.getRepository(Room).countBy({ number })) continue;
+      if (await m.getRepository(Room).countBy({ houseId, number })) continue;
       const floorId = floors.find((f) => f.number === fl)!.id;
-      const res = await m.getRepository(Room).insert({ number, floorId, currentRent: rent, status: "VACANT", notes: null });
-      await m.getRepository(RoomRentHistory).insert({ roomId: res.identifiers[0].id, rent, effectiveFrom: "2000-01-01" });
+      const res = await m.getRepository(Room).insert({
+        number, floorId, houseId, rentalType: "MONTHLY", currentRent: rent, status: "VACANT", notes: null,
+      });
+      await m.getRepository(RoomRentHistory).insert({
+        roomId: res.identifiers[0].id, rentalType: "MONTHLY", rent, effectiveFrom: "2000-01-01",
+      });
     }
     for (const name of CATEGORIES) {
       if (!(await m.getRepository(ExpenseCategory).countBy({ name }))) await m.getRepository(ExpenseCategory).insert({ name });
