@@ -14,6 +14,8 @@ import {
 
 export type Role = "ADMIN" | "STAFF";
 export type RoomStatus = "VACANT" | "OCCUPIED" | "MAINTENANCE";
+export type RentalType = "MONTHLY" | "DAILY";
+export type StayStatus = "ACTIVE" | "ENDED" | "CANCELLED";
 
 @Entity("users")
 export class User {
@@ -26,21 +28,52 @@ export class User {
   @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
 }
 
+@Entity("locations")
+export class Location {
+  @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "varchar", length: 120 }) name!: string;
+  @Column({ type: "text", nullable: true }) notes!: string | null;
+}
+
+@Entity("houses")
+export class House {
+  @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) locationId!: number;
+  @ManyToOne("Location", { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "locationId" })
+  location!: Location;
+  @Column({ type: "varchar", length: 120 }) name!: string;
+  @Column({ type: "text", nullable: true }) address!: string | null;
+  @Column({ type: "boolean", default: true }) active!: boolean;
+}
+
 @Entity("floors")
+@Unique(["houseId", "number"])
 export class Floor {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
-  @Column({ type: "int", unique: true }) number!: number;
+  @Column({ type: "int" }) houseId!: number;
+  @ManyToOne("House", { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "houseId" })
+  house!: House;
+  @Column({ type: "int" }) number!: number;
   @Column({ type: "varchar", length: 80 }) name!: string;
 }
 
 @Entity("rooms")
+@Unique(["houseId", "number"])
 export class Room {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
-  @Column({ type: "varchar", length: 20, unique: true }) number!: string;
+  @Column({ type: "varchar", length: 20 }) number!: string;
   @Column({ type: "int" }) floorId!: number;
   @ManyToOne("Floor", { onDelete: "RESTRICT" })
   @JoinColumn({ name: "floorId" })
   floor!: Floor;
+  /** Denormalized from floor.houseId so (houseId, number) can be enforced without a join. */
+  @Column({ type: "int" }) houseId!: number;
+  @ManyToOne("House", { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "houseId" })
+  house!: House;
+  @Column({ type: "varchar", length: 10, default: "MONTHLY" }) rentalType!: RentalType;
   @Column({ type: "int" }) currentRent!: number;
   @Column({ type: "varchar", length: 12, default: "VACANT" }) status!: RoomStatus;
   @Column({ type: "text", nullable: true }) notes!: string | null;
@@ -53,6 +86,7 @@ export class RoomRentHistory {
   @ManyToOne("Room", { onDelete: "CASCADE" })
   @JoinColumn({ name: "roomId" })
   room!: Room;
+  @Column({ type: "varchar", length: 10, default: "MONTHLY" }) rentalType!: RentalType;
   @Column({ type: "int" }) rent!: number;
   @Column({ type: "date" }) effectiveFrom!: string;
 }
@@ -142,6 +176,40 @@ export class PaymentAllocation {
   @Column({ type: "int" }) amount!: number;
 }
 
+@Entity("stays")
+export class Stay {
+  @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) roomId!: number;
+  @ManyToOne("Room", { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "roomId" })
+  room!: Room;
+  @Column({ type: "varchar", length: 120 }) guestName!: string;
+  @Column({ type: "varchar", length: 30, nullable: true }) phone!: string | null;
+  @Column({ type: "date" }) checkIn!: string;
+  @Column({ type: "date", nullable: true }) checkOut!: string | null;
+  /** Nightly rate locked at check-in. */
+  @Column({ type: "int" }) dailyRate!: number;
+  @Column({ type: "varchar", length: 10, default: "ACTIVE" }) status!: StayStatus;
+  @Column({ type: "text", nullable: true }) notes!: string | null;
+  @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
+}
+
+@Entity("stay_payments")
+export class StayPayment {
+  @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) stayId!: number;
+  @ManyToOne("Stay", { onDelete: "RESTRICT" })
+  @JoinColumn({ name: "stayId" })
+  stay!: Stay;
+  @Column({ type: "int" }) amount!: number;
+  @Column({ type: "date" }) paidOn!: string;
+  @Column({ type: "varchar", length: 10 }) method!: PayMethod;
+  @Column({ type: "varchar", length: 80, nullable: true }) referenceNo!: string | null;
+  @Column({ type: "text", nullable: true }) note!: string | null;
+  @Column({ type: "int", nullable: true }) recordedById!: number | null;
+  @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
+}
+
 @Entity("expense_categories")
 export class ExpenseCategory {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
@@ -189,6 +257,6 @@ export class Setting {
 }
 
 export const ALL_ENTITIES = [
-  User, Floor, Room, RoomRentHistory, Tenant, Tenancy, RentCharge,
-  Payment, PaymentAllocation, ExpenseCategory, Expense, AuditLog, Setting,
+  User, Location, House, Floor, Room, RoomRentHistory, Tenant, Tenancy, RentCharge,
+  Payment, PaymentAllocation, Stay, StayPayment, ExpenseCategory, Expense, AuditLog, Setting,
 ];

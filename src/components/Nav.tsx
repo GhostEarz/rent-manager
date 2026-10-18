@@ -3,15 +3,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const items = [
-  ["/dashboard", "Dashboard"], ["/rent", "Rent"], ["/rooms", "Rooms"], ["/tenants", "Tenants"],
-  ["/payments", "Payments"], ["/expenses", "Expenses"], ["/reports", "Reports"], ["/settings", "Settings"],
+  ["/dashboard", "Dashboard"], ["/rent", "Rent"], ["/rooms", "Rooms"], ["/stays", "Stays"], ["/tenants", "Tenants"],
+  ["/payments", "Payments"], ["/expenses", "Expenses"], ["/reports", "Reports"], ["/analytics", "Analytics"],
+  ["/properties", "Properties"], ["/settings", "Settings"],
 ] as const;
+
+const adminOnly = new Set(["/properties", "/settings"]);
 
 export function Nav({ role }: { role: "ADMIN" | "STAFF" }) {
   const path = usePathname();
   return (
     <nav className="flex gap-1 overflow-x-auto lg:flex-col">
-      {items.filter(([h]) => role === "ADMIN" || h !== "/settings").map(([href, label]) => {
+      {items.filter(([h]) => role === "ADMIN" || !adminOnly.has(h)).map(([href, label]) => {
         const active = path === href || path.startsWith(href + "/");
         return (
           <Link

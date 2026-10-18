@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, allocate, chargeAmount, dueDateFor, monthRange, rentForMonth, statusFor } from "./billing-core";
+import { addMonths, allocate, chargeAmount, dueDateFor, monthRange, nightsBetween, rentForMonth, stayAmountDue, statusFor } from "./billing-core";
 
 describe("chargeAmount (pro-rating)", () => {
   const base = { rent: 6000, endDate: null, prorate: true };
@@ -35,6 +35,32 @@ describe("rentForMonth (rent change keeps past intact)", () => {
   });
   it("falls back when there is no history", () => {
     expect(rentForMonth([], "2026-07", 8000)).toBe(8000);
+  });
+  it("ignores DAILY history rows left over from a rental-type switch", () => {
+    const mixed = [
+      { rent: 6500, effectiveFrom: "2026-01-01", rentalType: "MONTHLY" },
+      { rent: 600, effectiveFrom: "2026-08-01", rentalType: "DAILY" },
+    ];
+    expect(rentForMonth(mixed, "2026-09", 0)).toBe(6500);
+  });
+});
+
+describe("nightsBetween / stayAmountDue", () => {
+  it("is 0 nights for a same-day stay", () => {
+    expect(nightsBetween("2026-05-01", "2026-05-01")).toBe(0);
+  });
+  it("counts nights as days between check-in and check-out, excluding checkout day", () => {
+    expect(nightsBetween("2026-05-01", "2026-05-03")).toBe(2);
+  });
+  it("uses asOf for an open stay with no checkout yet", () => {
+    expect(nightsBetween("2026-05-01", null, "2026-05-04")).toBe(3);
+  });
+  it("defaults an open stay with no asOf to 0 nights", () => {
+    expect(nightsBetween("2026-05-01", null)).toBe(0);
+  });
+  it("multiplies rate by nights", () => {
+    expect(stayAmountDue(1300, 3)).toBe(3900);
+    expect(stayAmountDue(1300, 0)).toBe(0);
   });
 });
 

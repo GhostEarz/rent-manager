@@ -52,3 +52,54 @@ export function TrendChart({ data }: { data: { month: string; received: number; 
     </ResponsiveContainer>
   );
 }
+
+/** Monthly vs daily revenue, stacked, per period in the analytics trend. */
+export function RevenueStackedChart({ data }: { data: { month: string; monthlyCollected: number; dailyCollected: number }[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+        <XAxis dataKey="month" tickFormatter={short} fontSize={11} />
+        <YAxis fontSize={11} width={48} tickFormatter={(v) => `${v / 1000}k`} />
+        <Tooltip formatter={fmt} labelFormatter={(m) => String(m)} />
+        <Legend />
+        <Bar dataKey="monthlyCollected" name="Monthly" stackId="rev" fill="#4f46e5" radius={[0, 0, 0, 0]} />
+        <Bar dataKey="dailyCollected" name="Daily" stackId="rev" fill="#06b6d4" radius={[3, 3, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Income vs expense vs net across periods. */
+export function PnlTrendChart({ data }: { data: { month: string; collected: number; expenses: number; net: number }[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+        <XAxis dataKey="month" tickFormatter={short} fontSize={11} />
+        <YAxis fontSize={11} width={48} tickFormatter={(v) => `${v / 1000}k`} />
+        <Tooltip formatter={fmt} />
+        <Legend />
+        <Line dataKey="collected" name="Income" stroke="#10b981" strokeWidth={2} dot={false} />
+        <Line dataKey="expenses" name="Expenses" stroke="#ef4444" strokeWidth={2} dot={false} />
+        <Line dataKey="net" name="Net" stroke="#4f46e5" strokeWidth={2} strokeDasharray="4 3" dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Revenue by house, horizontal bars (top N implied by caller slicing `data`). */
+export function HouseRevenueChart({ data }: { data: { houseName: string; revenue: number }[] }) {
+  if (!data.length) return <p className="py-16 text-center text-sm text-muted">No houses yet</p>;
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 40)}>
+      <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
+        <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+        <XAxis type="number" fontSize={11} tickFormatter={(v) => `${v / 1000}k`} />
+        <YAxis type="category" dataKey="houseName" fontSize={11} width={100} />
+        <Tooltip formatter={fmt} />
+        <Bar dataKey="revenue" name="Revenue" fill="#4f46e5" radius={[0, 3, 3, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}

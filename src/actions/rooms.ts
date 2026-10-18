@@ -8,7 +8,7 @@ import * as rooms from "@/server/services/rooms";
 export async function addFloorAction(_: unknown, fd: FormData) {
   return run(async () => {
     const u = await requireAdmin();
-    const v = z.object({ number: int, name: str }).parse(obj(fd));
+    const v = z.object({ houseId: id, number: int, name: str }).parse(obj(fd));
     await rooms.addFloor(actorOf(u), v);
   });
 }
@@ -28,7 +28,9 @@ export async function deleteFloorAction(_: unknown, fd: FormData) {
 export async function addRoomAction(_: unknown, fd: FormData) {
   return run(async () => {
     const u = await requireUser();
-    const v = z.object({ number: str, floorId: id, rent: posInt, notes: optStr }).parse(obj(fd));
+    const v = z.object({
+      number: str, floorId: id, rentalType: z.enum(["MONTHLY", "DAILY"]).default("MONTHLY"), rent: posInt, notes: optStr,
+    }).parse(obj(fd));
     await rooms.addRoom(actorOf(u), v);
   });
 }
@@ -50,5 +52,14 @@ export async function changeRentAction(_: unknown, fd: FormData) {
     const u = await requireAdmin();
     const v = z.object({ id, rent: posInt, effectiveFrom: date }).parse(obj(fd));
     await rooms.changeRoomRent(actorOf(u), v.id, v.rent, v.effectiveFrom);
+  });
+}
+export async function changeRentalTypeAction(_: unknown, fd: FormData) {
+  return run(async () => {
+    const u = await requireAdmin();
+    const v = z.object({
+      id, rentalType: z.enum(["MONTHLY", "DAILY"]), rent: posInt, effectiveFrom: date,
+    }).parse(obj(fd));
+    await rooms.changeRentalType(actorOf(u), v.id, v);
   });
 }

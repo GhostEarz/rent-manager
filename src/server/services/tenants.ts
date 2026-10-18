@@ -58,6 +58,7 @@ export interface CheckInInput {
 async function startTenancy(m: import("typeorm").EntityManager, input: CheckInInput) {
   const room = await m.getRepository(Room).findOneByOrFail({ id: input.roomId });
   if (room.status === "MAINTENANCE") throw new Error(`Room ${room.number} is under maintenance`);
+  if (room.rentalType !== "MONTHLY") throw new Error(`Room ${room.number} is a daily-rental room — check in a guest stay instead`);
   if (await m.getRepository(Tenancy).countBy({ roomId: room.id, status: "ACTIVE" }))
     throw new Error(`Room ${room.number} is already occupied`);
   if (await m.getRepository(Tenancy).countBy({ tenantId: input.tenantId, status: "ACTIVE" }))

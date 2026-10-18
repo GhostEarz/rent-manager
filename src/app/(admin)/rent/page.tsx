@@ -21,6 +21,10 @@ export default async function RentPage({ searchParams }: { searchParams: Promise
     <>
       <PageHeader title="Rent collection" sub={fmtMonth(month)}>
         <MonthPicker value={month} />
+        <a className="btn" href={`/api/receipts/monthly?month=${month}`}>Download receipts</a>
+        <a className="btn btn-sm" href={`/api/receipts/monthly?month=${month}&refresh=1`} title="Regenerate and save a fresh copy on Vercel Blob">
+          Refresh archive
+        </a>
         <PaymentDialog options={options as never} />
       </PageHeader>
       <div className="mb-4 grid grid-cols-3 gap-3">

@@ -32,19 +32,24 @@ export function dueDateFor(month: string, dueDay: number): string {
   return `${month}-${String(d).padStart(2, "0")}`;
 }
 
-/** Rent from room history that applies to `month` (latest entry effective on/before the 1st). */
+/**
+ * Rent from room history that applies to `month` (latest entry effective on/before the 1st).
+ * Only MONTHLY-tagged rows are considered, so a DAILY-rate row from a past rental-type switch
+ * is never misread as a monthly rent (and vice versa).
+ */
 export function rentForMonth(
-  history: { rent: number; effectiveFrom: string }[],
+  history: { rent: number; effectiveFrom: string; rentalType?: string }[],
   month: string,
   fallback: number,
 ): number {
   const first = firstDay(month);
+  const monthly = history.filter((h) => h.rentalType == null || h.rentalType === "MONTHLY");
   let best: { rent: number; effectiveFrom: string } | undefined;
-  for (const h of history) {
+  for (const h of monthly) {
     if (h.effectiveFrom <= first && (!best || h.effectiveFrom > best.effectiveFrom)) best = h;
   }
   // Tenancy started before any history entry → earliest known rent.
-  if (!best && history.length) best = [...history].sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))[0];
+  if (!best && monthly.length) best = [...monthly].sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))[0];
   return best ? best.rent : fallback;
 }
 
@@ -67,6 +72,21 @@ export function chargeAmount({ rent, startDate, endDate, month, prorate }: Charg
   const days = daysBetween(from, to) + 1;
   const dim = daysInMonth(month);
   return days >= dim ? rent : Math.round((rent * days) / dim);
+}
+
+/**
+ * Nights billed for a stay: the number of calendar days between check-in and check-out,
+ * excluding the checkout day itself (standard hotel convention — a guest who checks in on
+ * the 1st and out on the 3rd stays 2 nights). An open stay (no checkOut yet) is billed
+ * through `asOf` (default: check-in day itself, i.e. 0 nights so far).
+ */
+export function nightsBetween(checkIn: string, checkOut: string | null, asOf?: string): number {
+  const end = checkOut ?? asOf ?? checkIn;
+  return Math.max(0, daysBetween(checkIn, end));
+}
+
+export function stayAmountDue(dailyRate: number, nights: number): number {
+  return dailyRate * Math.max(0, nights);
 }
 
 export function statusFor(due: number, paid: number): Status {

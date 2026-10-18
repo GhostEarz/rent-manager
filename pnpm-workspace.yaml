@@ -1,0 +1,12 @@
+allowBuilds:
+  esbuild: true
+  fsevents: true
+  sharp: true
+  unrs-resolver: true
+
+peerDependencyRules:
+  allowedVersions:
+    eslint: "10"
+
+overrides:
+  typescript-eslint: ~8.71.2
