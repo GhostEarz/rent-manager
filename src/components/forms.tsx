@@ -24,7 +24,7 @@ export function PaymentDialog({
         ) : (
           <Field label="Tenant / room">
             <select name="tenancyId" required className="input" defaultValue="">
-              <option value="" disabled>Select…</option>
+              <option value="" disabled>{options.length ? "Select…" : "No active tenancies"}</option>
               {options.map((o) => <option key={o.id} value={o.id}>{o.houseName ? `${o.houseName} · ` : ""}Room {o.roomNumber} — {o.tenantName}{o.due > 0 ? ` (owes ₹${o.due})` : ""}</option>)}
             </select>
           </Field>

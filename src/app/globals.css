@@ -35,6 +35,10 @@ body { background: var(--bg); color: var(--fg); font-family: var(--font-sans); }
   .tbl td { @apply border-b border-line px-3 py-2 align-middle; }
   .tbl tr:last-child td { @apply border-b-0; }
 }
+/* Native dropdowns: without these, dark mode renders light option text on a light popup (items look empty). */
+:root { color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { color-scheme: dark; } }
+select.input option { background-color: var(--card); color: var(--fg); }
 dialog::backdrop { background: rgb(0 0 0 / 0.5); }
 dialog { color: var(--fg); }
 
