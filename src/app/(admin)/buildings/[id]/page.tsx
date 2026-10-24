@@ -47,7 +47,10 @@ export default async function BuildingPage({
       </div>
 
       <section className="mt-6">
-        <h2 className="mb-2 text-sm font-semibold">Rooms</h2>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="text-sm font-semibold">Rooms</h2>
+          <Link href="/rooms" className="btn btn-sm">Manage rooms</Link>
+        </div>
         {rooms.length === 0 ? <Empty>No rooms yet. <Link className="text-indigo-600 underline" href="/rooms">Add rooms</Link></Empty> : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
             {rooms.map((r) => {

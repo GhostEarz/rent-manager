@@ -13,6 +13,7 @@ const tabs: Item[] = [
   ["/expenses", "Expenses", "▤"],
 ];
 const more: Item[] = [
+  ["/rooms", "Rooms", "▣"],
   ["/stays", "Daily stays", "☾"],
   ["/tenants", "Tenants", "☺"],
   ["/payments", "Payments", "✓"],
