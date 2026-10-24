@@ -20,10 +20,14 @@ export default async function RoomsPage() {
   return (
     <>
       <PageHeader title="Rooms" sub={`${rooms.length} rooms on ${floors.length} floors`}>
-        {addTo && (
+        {houses.length > 0 && (
           <Modal trigger="Add floor" title="Add floor">
             <ActionForm action={addFloorAction}>
-              <input type="hidden" name="houseId" value={addTo} />
+              {addTo ? <input type="hidden" name="houseId" value={addTo} /> : (
+                <Field label="Building">
+                  <select name="houseId" required className="input">{houses.map((h: any) => <option key={h.id} value={h.id}>{h.name}</option>)}</select>
+                </Field>
+              )}
               <Row>
                 <Field label="Number"><input name="number" type="number" required className="input" defaultValue={floors.length + 1} /></Field>
                 <Field label="Name"><input name="name" required className="input" placeholder="Floor 3" /></Field>
@@ -32,6 +36,9 @@ export default async function RoomsPage() {
           </Modal>
         )}
         <Modal trigger="Add room" title="Add room" variant="primary">
+          {floors.length === 0 ? (
+            <p className="text-sm text-muted">Rooms live on a floor. Close this and use “Add floor” first (e.g. Ground floor), then add rooms to it.</p>
+          ) : (
           <ActionForm action={addRoomAction}>
             <Row>
               <Field label="Room number"><input name="number" required className="input" placeholder="108" /></Field>
@@ -50,6 +57,7 @@ export default async function RoomsPage() {
             </Row>
             <Field label="Notes"><input name="notes" className="input" /></Field>
           </ActionForm>
+          )}
         </Modal>
       </PageHeader>
 
