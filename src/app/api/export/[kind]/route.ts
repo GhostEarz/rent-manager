@@ -1,4 +1,4 @@
-import { auth } from "@/lib/auth";
+import { requireUser } from "@/lib/session";
 import { toCsv } from "@/lib/csv";
 import * as A from "@/server/services/analytics";
 import * as Q from "@/server/services/queries";
@@ -7,7 +7,7 @@ import { currentMonth, today } from "@/server/services/common";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request, { params }: { params: Promise<{ kind: string }> }) {
-  if (!(await auth())?.user) return new Response("Unauthorized", { status: 401 });
+  const user = await requireUser();
   const { kind } = await params;
   const sp = new URL(req.url).searchParams;
   const num = (k: string) => (sp.get(k) ? Number(sp.get(k)) : undefined);
@@ -15,31 +15,31 @@ export async function GET(req: Request, { params }: { params: Promise<{ kind: st
   let rows: Record<string, unknown>[];
   switch (kind) {
     case "payments":
-      rows = (await Q.paymentsLedger({
+      rows = (await Q.paymentsLedger(user, {
         from: sp.get("from") || undefined, to: sp.get("to") || undefined, method: sp.get("method") || undefined,
         tenantId: num("tenantId"), roomId: num("roomId"),
       })).map((p) => ({ date: p.paidOn, room: p.roomNumber, tenant: p.tenantName, method: p.method, amount: p.amount, reference: p.referenceNo, months: p.months, note: p.note }));
       break;
     case "expenses":
-      rows = (await Q.expensesList({ month: sp.get("month") || undefined, categoryId: num("categoryId") }))
-        .map((e) => ({ date: e.date, billMonth: e.billMonth, category: e.category, vendor: e.vendor, billNo: e.billNo, amount: e.amount, method: e.paymentMethod, room: e.roomNumber, note: e.note }));
+      rows = (await Q.expensesList(user, { month: sp.get("month") || undefined, categoryId: num("categoryId") }))
+        .map((e) => ({ date: e.date, billMonth: e.billMonth, category: e.category, vendor: e.vendor, billNo: e.billNo, amount: e.amount, method: e.paymentMethod, building: e.houseName, room: e.roomNumber, note: e.note }));
       break;
-    case "pnl": rows = await Q.pnlByMonth(year); break;
-    case "roomwise": rows = await Q.roomWise(year); break;
+    case "pnl": rows = await Q.pnlByMonth(user, year); break;
+    case "roomwise": rows = await Q.roomWise(user, year); break;
     case "defaulters":
-      rows = (await Q.defaulters()).map((r) => ({ room: r.roomNumber, tenant: r.name, phone: r.phone, owed: r.owed, oldestDue: r.oldestDue, daysOverdue: r.daysOverdue }));
+      rows = (await Q.defaulters(user)).map((r) => ({ room: r.roomNumber, tenant: r.name, phone: r.phone, owed: r.owed, oldestDue: r.oldestDue, daysOverdue: r.daysOverdue }));
       break;
     case "analytics-summary": {
       const f = analyticsFilterFrom(sp);
-      const s = await A.analyticsSummary(f);
+      const s = await A.analyticsSummary(user, f);
       rows = [{ from: f.from, to: f.to, ...s }];
       break;
     }
     case "revenue-by-house":
-      rows = await A.revenueByHouse(analyticsFilterFrom(sp));
+      rows = await A.revenueByHouse(user, analyticsFilterFrom(sp));
       break;
     case "room-performance":
-      rows = await A.roomPerformance(analyticsFilterFrom(sp)) as unknown as Record<string, unknown>[];
+      rows = await A.roomPerformance(user, analyticsFilterFrom(sp)) as unknown as Record<string, unknown>[];
       break;
     default: return new Response("Not found", { status: 404 });
   }

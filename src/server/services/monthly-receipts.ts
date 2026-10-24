@@ -21,9 +21,9 @@ export function blobStorageConfigured() {
   return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
-export async function getMonthlyReceiptArchive(month: string): Promise<MonthlyReceiptArchive | null> {
+export async function getMonthlyReceiptArchive(orgId: number, month: string): Promise<MonthlyReceiptArchive | null> {
   const db = await getDb();
-  const row = await db.getRepository(Setting).findOneBy({ key: monthlyReceiptSettingKey(month) });
+  const row = await db.getRepository(Setting).findOneBy({ orgId, key: monthlyReceiptSettingKey(month) });
   if (!row?.value) return null;
   try {
     return JSON.parse(row.value) as MonthlyReceiptArchive;
@@ -32,16 +32,16 @@ export async function getMonthlyReceiptArchive(month: string): Promise<MonthlyRe
   }
 }
 
-async function saveMonthlyReceiptArchive(month: string, archive: MonthlyReceiptArchive) {
+async function saveMonthlyReceiptArchive(orgId: number, month: string, archive: MonthlyReceiptArchive) {
   const db = await getDb();
-  await db.getRepository(Setting).save({ key: monthlyReceiptSettingKey(month), value: JSON.stringify(archive) });
+  await db.getRepository(Setting).save({ orgId, key: monthlyReceiptSettingKey(month), value: JSON.stringify(archive) });
 }
 
-export async function uploadMonthlyReceiptsHtml(month: string, html: string): Promise<MonthlyReceiptArchive> {
+export async function uploadMonthlyReceiptsHtml(orgId: number, month: string, html: string): Promise<MonthlyReceiptArchive> {
   if (!blobStorageConfigured()) {
     throw new Error("BLOB_READ_WRITE_TOKEN is not configured");
   }
-  const pathname = `rent-receipts/${month}.html`;
+  const pathname = `rent-receipts/${orgId}/${month}.html`;
   const blob = await put(pathname, html, {
     access: "private",
     contentType: "text/html; charset=utf-8",
@@ -53,7 +53,7 @@ export async function uploadMonthlyReceiptsHtml(month: string, html: string): Pr
     pathname: blob.pathname,
     generatedAt: new Date().toISOString(),
   };
-  await saveMonthlyReceiptArchive(month, archive);
+  await saveMonthlyReceiptArchive(orgId, month, archive);
   return archive;
 }
 
@@ -64,13 +64,14 @@ export async function fetchMonthlyReceiptHtml(archive: MonthlyReceiptArchive): P
 }
 
 export async function ensureMonthlyReceiptArchive(
+  orgId: number,
   month: string,
   settings: AppSettings,
   rows: MonthlyReceiptRow[],
   refresh = false,
 ): Promise<{ html: string; archive: MonthlyReceiptArchive }> {
   if (!refresh) {
-    const existing = await getMonthlyReceiptArchive(month);
+    const existing = await getMonthlyReceiptArchive(orgId, month);
     if (existing) {
       const html = await fetchMonthlyReceiptHtml(existing);
       if (html) return { html, archive: existing };
@@ -78,6 +79,6 @@ export async function ensureMonthlyReceiptArchive(
   }
   const generatedAt = new Date().toISOString();
   const html = buildMonthlyReceiptsHtml(settings, month, rows, generatedAt);
-  const archive = await uploadMonthlyReceiptsHtml(month, html);
+  const archive = await uploadMonthlyReceiptsHtml(orgId, month, html);
   return { html, archive };
 }

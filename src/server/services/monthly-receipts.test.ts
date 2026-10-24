@@ -18,6 +18,7 @@ describe("buildMonthlyReceiptsHtml", () => {
     tenantName: "Asha",
     phone: null,
     roomNumber: "101",
+    houseName: "Main",
     roomId: 3,
     month: "2026-04",
     amountDue: 6000,

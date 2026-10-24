@@ -4,6 +4,7 @@ import { ExpenseDonut, HouseRevenueChart, PnlTrendChart, RevenueStackedChart } f
 import { PrintButton } from "@/components/MonthPicker";
 import { Badge, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
 import { fmtDate, fmtMonth, rupees } from "@/lib/format";
+import { requireUser } from "@/lib/session";
 import { currentMonth } from "@/server/services/common";
 import * as A from "@/server/services/analytics";
 import * as Q from "@/server/services/queries";
@@ -13,6 +14,7 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<{ month?: string; locationId?: string; houseId?: string; rentalType?: string }>;
 }) {
+  const user = await requireUser();
   const sp = await searchParams;
   const month = sp.month?.match(/^\d{4}-\d{2}$/)?.[0] ?? currentMonth();
   const locationId = sp.locationId ? Number(sp.locationId) : undefined;
@@ -21,16 +23,16 @@ export default async function AnalyticsPage({
   const filter = A.monthFilter(month, { locationId, houseId, rentalType });
 
   const [summary, trend12, byHouse, occupancy, roomPerf, unpaid, defaulters, expCats, locations, houses] = await Promise.all([
-    A.analyticsSummary(filter),
-    trendRange(filter, 12),
-    A.revenueByHouse(filter),
-    A.occupancyStats(filter),
-    A.roomPerformance(filter),
-    A.unpaidStays(filter),
-    A.defaultersScoped(filter),
-    A.expensesByCategoryScoped(filter),
-    Q.listLocations(),
-    Q.houseOptions(),
+    A.analyticsSummary(user, filter),
+    trendRange(user, filter, 12),
+    A.revenueByHouse(user, filter),
+    A.occupancyStats(user, filter),
+    A.roomPerformance(user, filter),
+    A.unpaidStays(user, filter),
+    A.defaultersScoped(user, filter),
+    A.expensesByCategoryScoped(user, filter),
+    Q.listLocations(user),
+    Q.houseOptions(user),
   ]);
 
   return (
@@ -75,19 +77,19 @@ export default async function AnalyticsPage({
           <ExpenseDonut data={expCats as never} />
         </div>
         <div className="card">
-          <h2 className="mb-2 text-sm font-semibold">Revenue by house</h2>
+          <h2 className="mb-2 text-sm font-semibold">Revenue by building</h2>
           <HouseRevenueChart data={byHouse as never} />
         </div>
       </div>
 
       <div className="mt-6 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">House summary</h2>
+        <h2 className="text-sm font-semibold">Building summary</h2>
         <a className="btn btn-sm no-print" href={`/api/export/revenue-by-house?${toQuery(sp)}`}>CSV</a>
       </div>
       <TableWrap>
-        {byHouse.length === 0 ? <Empty>No houses yet</Empty> : (
+        {byHouse.length === 0 ? <Empty>No buildings yet</Empty> : (
           <table className="tbl">
-            <thead><tr><th>House</th><th className="text-right">Monthly</th><th className="text-right">Daily</th><th className="text-right">Revenue</th><th className="text-right">Expenses</th><th className="text-right">Net</th></tr></thead>
+            <thead><tr><th>Building</th><th className="text-right">Monthly</th><th className="text-right">Daily</th><th className="text-right">Revenue</th><th className="text-right">Expenses</th><th className="text-right">Net</th></tr></thead>
             <tbody>
               {byHouse.map((h: any) => (
                 <tr key={h.houseId}>
@@ -111,7 +113,7 @@ export default async function AnalyticsPage({
       <TableWrap>
         {roomPerf.length === 0 ? <Empty>No rooms yet</Empty> : (
           <table className="tbl">
-            <thead><tr><th>Room</th><th>House</th><th>Type</th><th className="text-right">Expected</th><th className="text-right">Collected</th><th className="text-right">Pending</th><th className="text-right">Stays</th></tr></thead>
+            <thead><tr><th>Room</th><th>Building</th><th>Type</th><th className="text-right">Expected</th><th className="text-right">Collected</th><th className="text-right">Pending</th><th className="text-right">Stays</th></tr></thead>
             <tbody>
               {roomPerf.map((r) => (
                 <tr key={r.roomId}>
@@ -135,7 +137,7 @@ export default async function AnalyticsPage({
           <TableWrap>
             {defaulters.length === 0 ? <Empty>No overdue rent.</Empty> : (
               <table className="tbl">
-                <thead><tr><th>Room</th><th>Tenant</th><th>House</th><th className="text-right">Owes</th></tr></thead>
+                <thead><tr><th>Room</th><th>Tenant</th><th>Building</th><th className="text-right">Owes</th></tr></thead>
                 <tbody>
                   {defaulters.map((d: any) => (
                     <tr key={d.tenancyId}>
@@ -175,12 +177,12 @@ export default async function AnalyticsPage({
   );
 }
 
-async function trendRange(filter: A.AnalyticsFilter, periods: number) {
+async function trendRange(user: import("@/server/services/common").Actor, filter: A.AnalyticsFilter, periods: number) {
   const { addMonths } = await import("@/server/services/billing-core");
   const month = filter.from.slice(0, 7);
   const from = addMonths(month, -(periods - 1));
   const wide = { ...filter, from: `${from}-01`, to: filter.to };
-  return A.revenueTrend(wide);
+  return A.revenueTrend(user, wide);
 }
 
 function toQuery(sp: Record<string, string | undefined>) {

@@ -6,7 +6,8 @@ import { Modal } from "./Modal";
 import { Field, Row, todayStr } from "./ui";
 import { fmtMonth } from "@/lib/format";
 
-export interface TenancyOption { id: number; tenantName: string; roomNumber: string; due: number }
+export interface TenancyOption { id: number; tenantName: string; roomNumber: string; due: number; houseName?: string }
+export interface HouseOption { id: number; name: string; locationName?: string }
 
 export function PaymentDialog({
   options, tenancyId, charge, amount, label = "Record payment", small = false, variant = "primary",
@@ -24,7 +25,7 @@ export function PaymentDialog({
           <Field label="Tenant / room">
             <select name="tenancyId" required className="input" defaultValue="">
               <option value="" disabled>Select…</option>
-              {options.map((o) => <option key={o.id} value={o.id}>Room {o.roomNumber} — {o.tenantName}{o.due > 0 ? ` (owes ₹${o.due})` : ""}</option>)}
+              {options.map((o) => <option key={o.id} value={o.id}>{o.houseName ? `${o.houseName} · ` : ""}Room {o.roomNumber} — {o.tenantName}{o.due > 0 ? ` (owes ₹${o.due})` : ""}</option>)}
             </select>
           </Field>
         )}
@@ -53,12 +54,26 @@ export function PaymentDialog({
   );
 }
 
-export function TenantDialog({ tenant, label, small = false }: { tenant?: Record<string, any>; label: string; small?: boolean }) {
+export function TenantDialog({
+  tenant, label, small = false, houses = [], defaultHouseId,
+}: {
+  tenant?: Record<string, any>; label: string; small?: boolean; houses?: HouseOption[]; defaultHouseId?: number | null;
+}) {
   const t = tenant ?? {};
   return (
     <Modal trigger={label} title={tenant ? "Edit tenant" : "Add tenant"} variant={tenant ? "" : "primary"} small={small}>
       <ActionForm action={tenant ? updateTenantAction : createTenantAction}>
         {tenant && <input type="hidden" name="id" value={t.id} />}
+        {!tenant && (houses.length === 1 ? (
+          <input type="hidden" name="houseId" value={houses[0].id} />
+        ) : (
+          <Field label="Building">
+            <select name="houseId" required className="input" defaultValue={defaultHouseId ?? ""}>
+              <option value="" disabled>Select…</option>
+              {houses.map((h) => <option key={h.id} value={h.id}>{h.locationName ? `${h.locationName} — ` : ""}{h.name}</option>)}
+            </select>
+          </Field>
+        ))}
         <Field label="Name"><input name="name" required defaultValue={t.name} className="input" /></Field>
         <Row>
           <Field label="Phone"><input name="phone" defaultValue={t.phone ?? ""} className="input" inputMode="tel" /></Field>
@@ -78,15 +93,22 @@ export function TenantDialog({ tenant, label, small = false }: { tenant?: Record
 }
 
 export function ExpenseDialog({
-  expense, categories, rooms, label, small = false,
+  expense, categories, houses, defaultHouseId, label, small = false,
 }: {
-  expense?: Record<string, any>; categories: { id: number; name: string }[]; rooms: { id: number; number: string }[]; label: string; small?: boolean;
+  expense?: Record<string, any>; categories: { id: number; name: string }[]; houses: HouseOption[];
+  defaultHouseId?: number | null; label: string; small?: boolean;
 }) {
   const e = expense ?? {};
   return (
     <Modal trigger={label} title={expense ? "Edit expense" : "Add expense"} variant={expense ? "" : "primary"} small={small}>
       <ActionForm action={saveExpenseAction}>
         {expense && <input type="hidden" name="id" value={e.id} />}
+        <Field label="Building">
+          <select name="houseId" required className="input" defaultValue={e.houseId ?? defaultHouseId ?? (houses.length === 1 ? houses[0].id : "")}>
+            <option value="" disabled>Select…</option>
+            {houses.map((h) => <option key={h.id} value={h.id}>{h.locationName ? `${h.locationName} — ` : ""}{h.name}</option>)}
+          </select>
+        </Field>
         <Row>
           <Field label="Category">
             <select name="categoryId" required className="input" defaultValue={e.categoryId ?? ""}>
@@ -104,20 +126,12 @@ export function ExpenseDialog({
           <Field label="Vendor"><input name="vendor" defaultValue={e.vendor ?? ""} className="input" /></Field>
           <Field label="Bill no."><input name="billNo" defaultValue={e.billNo ?? ""} className="input" /></Field>
         </Row>
-        <Row>
-          <Field label="Payment method">
-            <select name="paymentMethod" className="input" defaultValue={e.paymentMethod ?? ""}>
-              <option value="">—</option>
-              {["UPI", "CASH", "BANK", "CHEQUE"].map((m) => <option key={m}>{m}</option>)}
-            </select>
-          </Field>
-          <Field label="Room (if specific)">
-            <select name="roomId" className="input" defaultValue={e.roomId ?? ""}>
-              <option value="">Whole building</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.number}</option>)}
-            </select>
-          </Field>
-        </Row>
+        <Field label="Payment method">
+          <select name="paymentMethod" className="input" defaultValue={e.paymentMethod ?? ""}>
+            <option value="">—</option>
+            {["UPI", "CASH", "BANK", "CHEQUE"].map((m) => <option key={m}>{m}</option>)}
+          </select>
+        </Field>
         <Field label="Bill / attachment link"><input name="attachmentUrl" defaultValue={e.attachmentUrl ?? ""} className="input" /></Field>
         <Field label="Note"><input name="note" defaultValue={e.note ?? ""} className="input" /></Field>
       </ActionForm>

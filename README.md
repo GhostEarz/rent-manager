@@ -1,7 +1,8 @@
 # Rent Manager
 
-Rooms, tenants, rent collection, payments and building expenses for a small rental building.
-Next.js 15 · TypeORM + plain PostgreSQL · Auth.js (credentials, JWT) · Tailwind · Recharts.
+Multi-tenant rental management for owners with several buildings: monthly and daily rooms, rent collection,
+daily-stay calendars, per-building expenses and analytics, and managers limited to the buildings you assign.
+Mobile-first PWA (installable from the browser). Next.js · TypeORM + plain PostgreSQL · Auth.js (credentials, JWT) · Tailwind · Recharts.
 
 ## Run locally (no Docker)
 
@@ -12,16 +13,16 @@ Next.js 15 · TypeORM + plain PostgreSQL · Auth.js (credentials, JWT) · Tailwi
 2. Configure env — copy `.env.example` to `.env.local` and fill in:
    - `DATABASE_URL=postgres://<you>@localhost:5432/rent_manager`
    - `AUTH_SECRET` (`openssl rand -base64 32`), `CRON_SECRET`
-   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — the first admin created by the seed
+   - `ADMIN_EMAIL` / `ADMIN_PASSWORD` — the first owner created by the seed (anyone else can sign up at `/signup`, which creates their own organization)
 3. ```bash
    npm install
    npm run migration:run   # create tables
-   npm run seed            # 2 floors, 13 rooms (6×₹6,500, 5×₹7,000, 2×₹8,000), categories, admin
+   npm run seed            # organization + owner + expense categories (SEED_DEMO=1 adds two demo buildings and a manager)
    npm run dev
    ```
-4. Open http://localhost:3000 and sign in. Assign the real rent to each room on **Rooms → Change rent**.
+4. Open http://localhost:3000 and sign in (or create an account at `/signup`). Add locations and buildings under **More → Locations & buildings**, then floors and rooms (monthly or daily, with the ₹ rate) under **Rooms**.
 
-Other scripts: `npm test` (billing unit tests), `npm run build`, `npm run migration:generate -- src/server/migrations/Name`.
+Other scripts: `npm test` (billing unit tests; plus the multi-tenant integration tests when `TEST_DATABASE_URL` points at a migrated Postgres), `npm run build`, `npm run migration:generate -- src/server/migrations/Name`.
 
 ## How it works
 
@@ -29,12 +30,16 @@ Other scripts: `npm test` (billing unit tests), `npm run build`, `npm run migrat
 - **Rent history is never rewritten.** Changing a room's rent adds a `room_rent_history` row with an effective date; each month's charge is created once and keeps the amount it was created with. A tenancy follows its room's rent unless a custom rent is set.
 - **Charges** are generated lazily on every page load (`ensureCharges`) and by `POST /api/cron/generate-charges`, so a missed cron is harmless. First/last month are pro-rated (toggle in Settings).
 - **Payments** apply to the chosen month or the oldest unpaid one; overflow becomes advance credit and settles future charges automatically.
-- **Roles:** `ADMIN` can do everything. `STAFF` can record payments/expenses, add tenants/rooms and check-in/out, but cannot delete, change rents, or open Settings (enforced in server actions, not just hidden in the UI).
+- **Multi-tenancy:** every owner signs up into an `organization`; locations, buildings, users, tenants, expense categories and settings belong to it. Isolation is enforced in the service layer: each request resolves an `Actor` (`src/lib/session.ts`) carrying the exact set of `houseIds` the user may touch, and every query/mutation filters on it (`src/server/services/access.ts` for by-id loads, `queries.ts`/`analytics.ts` for reads). An id from another organization behaves as "not found". See `multitenancy.test.ts`.
+- **Roles:** `OWNER` sees every building in the organization, and manages locations/buildings, team, settings, rents and deletions. `MANAGER` only sees the buildings assigned under **Team** (`user_houses`); they can record bookings, rent, payments and expenses, add rooms/floors/tenants, and check in/out, but cannot delete records, change rents, or open Team/Settings. Access is re-read from the database on every request, so removing a building or deactivating a user takes effect immediately.
+- **Daily rooms:** stays use nights `[check-in, check-out)`; the check-out day is free for the next guest and overlapping bookings are rejected. Future dates create a `BOOKED` stay; each daily room has a month calendar (`/rooms/[id]`) with occupied/vacant night counts.
+- **Expenses** always belong to one building and roll up into that building's analytics (`/buildings/[id]`) and the dashboard.
+- **PWA:** `app/manifest.ts`, `public/sw.js` (offline fallback page only — rent data is never cached) and icons make the app installable; the layout uses a bottom tab bar on phones and a sidebar on desktop.
 - Business logic lives in `src/server/services/*` (framework-agnostic); server actions in `src/actions/*` only validate (zod) and check roles.
 
 ## Deploy on Vercel (free)
 
-1. Push the repo to GitHub and import it in Vercel.
+1. Push the repo to GitHub and import it in Vercel. Run `npm run migration:run` for existing databases: it moves single-property data into one default organization (role `ADMIN`→`OWNER`, `STAFF`→`MANAGER`).
 2. **Storage tab → Create → Postgres (Neon via Marketplace).** It injects `DATABASE_URL` (use the pooled string). Add `DB_SSL=true`.
 3. Add env vars `AUTH_SECRET`, `CRON_SECRET`, and (first deploy only) `ADMIN_EMAIL`, `ADMIN_PASSWORD`.
 4. Deploy — the `vercel-build` script runs migrations before building. Run the seed once against the production DB:

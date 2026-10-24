@@ -2,7 +2,7 @@
 // and the daily ledger (stay_payments / stays) without double-counting either one.
 import { getDb } from "../db/data-source";
 import { addMonths } from "./billing-core";
-import { today } from "./common";
+import { scopeHouses, today, type Actor } from "./common";
 
 async function q<T = any>(sql: string, params: unknown[] = []): Promise<T[]> {
   const db = await getDb();
@@ -22,19 +22,31 @@ export function monthFilter(month: string, extra: Omit<AnalyticsFilter, "from" |
   return { from: `${month}-01`, to: addMonths(month, 1) + "-01", ...extra };
 }
 
-/** Room-scope WHERE fragment + params shared by every query below (alias "r" = rooms). */
-function roomScope(f: AnalyticsFilter, startParamIndex: number) {
+/**
+ * Room-scope WHERE fragment + params shared by every query below (alias "r" = rooms, "h" = houses).
+ * Always limited to the houses the actor may see, then narrowed by the optional filters.
+ */
+function roomScope(a: Actor, f: AnalyticsFilter, startParamIndex: number) {
   const w: string[] = [];
   const p: unknown[] = [];
   let i = startParamIndex;
-  if (f.houseId) { w.push(`r."houseId" = $${i++}`); p.push(f.houseId); }
-  else if (f.locationId) { w.push(`h."locationId" = $${i++}`); p.push(f.locationId); }
+  w.push(`r."houseId" = ANY($${i++}::int[])`); p.push(scopeHouses(a, f.houseId));
+  if (f.locationId && !f.houseId) { w.push(`h."locationId" = $${i++}`); p.push(f.locationId); }
   if (f.rentalType) { w.push(`r."rentalType" = $${i++}`); p.push(f.rentalType); }
-  return { sql: w.length ? "AND " + w.join(" AND ") : "", params: p, next: i };
+  return { sql: "AND " + w.join(" AND "), params: p, next: i };
 }
 
-export async function analyticsSummary(f: AnalyticsFilter) {
-  const scope = roomScope(f, 3);
+/** Expense scope: expenses belong to a building ("e"/"h"); the rental-type filter does not apply to them. */
+function expenseScope(a: Actor, f: AnalyticsFilter, startParamIndex: number) {
+  const w = [`e."houseId" = ANY($${startParamIndex}::int[])`];
+  const p: unknown[] = [scopeHouses(a, f.houseId)];
+  if (f.locationId && !f.houseId) { w.push(`h."locationId" = $${startParamIndex + 1}`); p.push(f.locationId); }
+  return { sql: "AND " + w.join(" AND "), params: p };
+}
+
+export async function analyticsSummary(a: Actor, f: AnalyticsFilter) {
+  const scope = roomScope(a, f, 3);
+  const own = roomScope(a, f, 1); // for queries that don't take the period as $1/$2
   const [monthly] = await q(
     `SELECT COALESCE(SUM(a.amount),0)::int AS collected
        FROM payment_allocations a
@@ -60,11 +72,11 @@ export async function analyticsSummary(f: AnalyticsFilter) {
   );
   const [expenses] = await q(
     `SELECT COALESCE(SUM(e.amount),0)::int AS expenses
-       FROM expenses e LEFT JOIN rooms r ON r.id = e."roomId" LEFT JOIN houses h ON h.id = r."houseId"
-      WHERE e.date >= $1 AND e.date < $2 ${f.houseId || f.locationId ? "AND r.id IS NOT NULL " + scope.sql : ""}`,
-    [f.from, f.to, ...(f.houseId || f.locationId ? scope.params : [])],
+       FROM expenses e JOIN houses h ON h.id = e."houseId"
+      WHERE e.date >= $1 AND e.date < $2 ${expenseScope(a, f, 3).sql}`,
+    [f.from, f.to, ...expenseScope(a, f, 3).params],
   );
-  const pendingScope = roomScope(f, 1);
+  const pendingScope = roomScope(a, f, 1);
   const [pendingMonthly] = await q(
     `SELECT COALESCE(SUM(c."amountDue" - COALESCE((SELECT SUM(a.amount) FROM payment_allocations a WHERE a."chargeId" = c.id),0)),0)::int AS pending
        FROM rent_charges c JOIN tenancies y ON y.id = c."tenancyId"
@@ -94,8 +106,8 @@ export async function analyticsSummary(f: AnalyticsFilter) {
   };
 }
 
-export async function revenueTrend(f: AnalyticsFilter) {
-  const scope = roomScope(f, 3);
+export async function revenueTrend(a: Actor, f: AnalyticsFilter) {
+  const scope = roomScope(a, f, 3);
   const rows = await q(
     `WITH m AS (SELECT to_char(d,'YYYY-MM') AS month FROM generate_series($1::date, ($2::date - interval '1 day'), interval '1 month') d)
      SELECT m.month,
@@ -108,10 +120,10 @@ export async function revenueTrend(f: AnalyticsFilter) {
        COALESCE((SELECT SUM(c."amountDue") FROM rent_charges c JOIN tenancies y ON y.id = c."tenancyId"
                  JOIN rooms r ON r.id = y."roomId" JOIN houses h ON h.id = r."houseId"
                  WHERE c.month = m.month ${scope.sql}),0)::int AS expected,
-       COALESCE((SELECT SUM(e.amount) FROM expenses e LEFT JOIN rooms r ON r.id = e."roomId" LEFT JOIN houses h ON h.id = r."houseId"
-                 WHERE e."billMonth" = m.month ${f.houseId || f.locationId ? "AND r.id IS NOT NULL " + scope.sql : ""}),0)::int AS expenses
+       COALESCE((SELECT SUM(e.amount) FROM expenses e JOIN houses h ON h.id = e."houseId"
+                 WHERE e."billMonth" = m.month ${expenseScope(a, f, 3 + scope.params.length).sql}),0)::int AS expenses
      FROM m ORDER BY m.month`,
-    [f.from, f.to, ...scope.params],
+    [f.from, f.to, ...scope.params, ...expenseScope(a, f, 3 + scope.params.length).params],
   );
   return rows.map((r: any) => ({
     ...r,
@@ -120,10 +132,9 @@ export async function revenueTrend(f: AnalyticsFilter) {
   }));
 }
 
-export async function revenueByHouse(f: AnalyticsFilter) {
-  const w: string[] = []; const p: unknown[] = [f.from, f.to];
-  if (f.houseId) { w.push(`h.id = $${p.length + 1}`); p.push(f.houseId); }
-  else if (f.locationId) { w.push(`h."locationId" = $${p.length + 1}`); p.push(f.locationId); }
+export async function revenueByHouse(a: Actor, f: AnalyticsFilter) {
+  const w: string[] = [`h.id = ANY($3::int[])`]; const p: unknown[] = [f.from, f.to, scopeHouses(a, f.houseId)];
+  if (f.locationId && !f.houseId) { w.push(`h."locationId" = $${p.length + 1}`); p.push(f.locationId); }
   const rows = await q(
     `SELECT h.id AS "houseId", h.name AS "houseName",
        COALESCE((SELECT SUM(a.amount) FROM payment_allocations a JOIN payments p ON p.id = a."paymentId"
@@ -131,10 +142,10 @@ export async function revenueByHouse(f: AnalyticsFilter) {
                  WHERE r."houseId" = h.id AND p."paidOn" >= $1 AND p."paidOn" < $2),0)::int AS "monthlyCollected",
        COALESCE((SELECT SUM(sp.amount) FROM stay_payments sp JOIN stays s ON s.id = sp."stayId" JOIN rooms r ON r.id = s."roomId"
                  WHERE r."houseId" = h.id AND sp."paidOn" >= $1 AND sp."paidOn" < $2),0)::int AS "dailyCollected",
-       COALESCE((SELECT SUM(e.amount) FROM expenses e JOIN rooms r ON r.id = e."roomId"
-                 WHERE r."houseId" = h.id AND e.date >= $1 AND e.date < $2),0)::int AS expenses
+       COALESCE((SELECT SUM(e.amount) FROM expenses e
+                 WHERE e."houseId" = h.id AND e.date >= $1 AND e.date < $2),0)::int AS expenses
      FROM houses h
-     ${w.length ? "WHERE " + w.join(" AND ") : ""}
+     WHERE ${w.join(" AND ")}
      ORDER BY h.name`,
     p,
   );
@@ -145,17 +156,18 @@ export async function revenueByHouse(f: AnalyticsFilter) {
   }));
 }
 
-export async function occupancyStats(f: AnalyticsFilter) {
-  const scope = roomScope(f, 3);
+export async function occupancyStats(a: Actor, f: AnalyticsFilter) {
+  const scope = roomScope(a, f, 3);
+  const own = roomScope(a, f, 1); // for queries that don't take the period as $1/$2
   const [monthly] = await q(
     `SELECT COUNT(*) FILTER (WHERE r.status = 'OCCUPIED')::int AS occupied, COUNT(*)::int AS total
        FROM rooms r JOIN houses h ON h.id = r."houseId"
-      WHERE r."rentalType" = 'MONTHLY' ${scope.sql}`,
-    scope.params,
+      WHERE r."rentalType" = 'MONTHLY' ${own.sql}`,
+    own.params,
   );
   const [daily] = await q(
     `SELECT COUNT(DISTINCT r.id)::int AS total,
-            COALESCE(SUM(GREATEST(0, LEAST(COALESCE(s."checkOut", $2::date), $2::date) - GREATEST(s."checkIn", $1::date))),0)::int AS "roomNightsSold"
+            COALESCE(SUM(CASE WHEN s.id IS NULL THEN 0 ELSE GREATEST(0, LEAST(COALESCE(s."checkOut", CURRENT_DATE + 1), $2::date) - GREATEST(s."checkIn", $1::date)) END),0)::int AS "roomNightsSold"
        FROM rooms r JOIN houses h ON h.id = r."houseId"
        LEFT JOIN stays s ON s."roomId" = r.id AND s.status != 'CANCELLED' AND s."checkIn" < $2 AND (s."checkOut" IS NULL OR s."checkOut" > $1)
       WHERE r."rentalType" = 'DAILY' ${scope.sql}`,
@@ -163,8 +175,8 @@ export async function occupancyStats(f: AnalyticsFilter) {
   );
   const days = Math.max(1, Math.round((Date.parse(f.to) - Date.parse(f.from)) / 86_400_000));
   const dailyRoomCount = await q(
-    `SELECT COUNT(*)::int AS n FROM rooms r JOIN houses h ON h.id = r."houseId" WHERE r."rentalType" = 'DAILY' ${scope.sql}`,
-    scope.params,
+    `SELECT COUNT(*)::int AS n FROM rooms r JOIN houses h ON h.id = r."houseId" WHERE r."rentalType" = 'DAILY' ${own.sql}`,
+    own.params,
   ).then((rows) => rows[0].n as number);
   return {
     monthlyOccupied: monthly.occupied as number,
@@ -179,8 +191,8 @@ export interface RoomPerformanceRow {
   expected: number; collected: number; pending: number; stays: number;
 }
 
-export async function roomPerformance(f: AnalyticsFilter): Promise<RoomPerformanceRow[]> {
-  const scope = roomScope(f, 3);
+export async function roomPerformance(a: Actor, f: AnalyticsFilter): Promise<RoomPerformanceRow[]> {
+  const scope = roomScope(a, f, 3);
   return q(
     `SELECT r.id AS "roomId", r.number AS "roomNumber", h.name AS "houseName", r."rentalType",
        COALESCE((SELECT SUM(c."amountDue") FROM rent_charges c JOIN tenancies y ON y.id = c."tenancyId"
@@ -202,8 +214,8 @@ export async function roomPerformance(f: AnalyticsFilter): Promise<RoomPerforman
 }
 
 /** Completed (checked-out) stays with an outstanding balance. */
-export async function unpaidStays(f: AnalyticsFilter) {
-  const scope = roomScope(f, 3);
+export async function unpaidStays(a: Actor, f: AnalyticsFilter) {
+  const scope = roomScope(a, f, 3);
   return q(
     `SELECT s.id, r.number AS "roomNumber", h.name AS "houseName", s."guestName", s.phone, s."checkIn", s."checkOut",
             (s."dailyRate" * (s."checkOut" - s."checkIn"))::int AS total,
@@ -218,8 +230,8 @@ export async function unpaidStays(f: AnalyticsFilter) {
 }
 
 /** Overdue monthly rent, scoped to house/location (reuses the same shape as queries.overdue). */
-export async function defaultersScoped(f: AnalyticsFilter) {
-  const scope = roomScope(f, 2);
+export async function defaultersScoped(a: Actor, f: AnalyticsFilter) {
+  const scope = roomScope(a, f, 2);
   const t = today();
   const rows = await q(
     `SELECT te.id AS "tenantId", te.name, te.phone, r.number AS "roomNumber", h.name AS "houseName", y.id AS "tenancyId",
@@ -234,14 +246,19 @@ export async function defaultersScoped(f: AnalyticsFilter) {
   return rows;
 }
 
-export const expensesByCategoryScoped = (f: AnalyticsFilter) => {
-  const scope = roomScope(f, 3);
+export const expensesByCategoryScoped = (a: Actor, f: AnalyticsFilter) => {
+  const scope = expenseScope(a, f, 3);
   return q(
     `SELECT k.name, SUM(e.amount)::int AS value
-       FROM expenses e JOIN expense_categories k ON k.id = e."categoryId"
-       LEFT JOIN rooms r ON r.id = e."roomId" LEFT JOIN houses h ON h.id = r."houseId"
-      WHERE e.date >= $1 AND e.date < $2 ${f.houseId || f.locationId ? "AND r.id IS NOT NULL " + scope.sql : ""}
+       FROM expenses e JOIN expense_categories k ON k.id = e."categoryId" JOIN houses h ON h.id = e."houseId"
+      WHERE e.date >= $1 AND e.date < $2 ${scope.sql}
       GROUP BY k.name ORDER BY value DESC`,
-    [f.from, f.to, ...(f.houseId || f.locationId ? scope.params : [])],
+    [f.from, f.to, ...scope.params],
   );
 };
+
+/** revenueTrend over the `periods` months ending at the filter's month. */
+export function revenueTrendMonths(a: Actor, f: AnalyticsFilter, periods: number) {
+  const from = addMonths(f.from.slice(0, 7), -(periods - 1));
+  return revenueTrend(a, { ...f, from: `${from}-01` });
+}

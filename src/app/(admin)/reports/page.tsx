@@ -2,14 +2,18 @@ import Link from "next/link";
 import { PrintButton } from "@/components/MonthPicker";
 import { Badge, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
 import { fmtMonth, rupees } from "@/lib/format";
+import { activeHouseId } from "@/lib/house";
+import { requireUser } from "@/lib/session";
 import { today } from "@/server/services/common";
 import * as Q from "@/server/services/queries";
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ year?: string }> }) {
+  const user = await requireUser();
+  const houseId = await activeHouseId(user);
   const thisYear = Number(today().slice(0, 4));
   const year = Number((await searchParams).year) || thisYear;
   const [pnl, cats, rooms, late, tenants] = await Promise.all([
-    Q.pnlByMonth(year), Q.expenseByCategoryYear(year), Q.roomWise(year), Q.defaulters(), Q.tenantsList(),
+    Q.pnlByMonth(user, year, houseId), Q.expenseByCategoryYear(user, year, houseId), Q.roomWise(user, year, houseId), Q.defaulters(user, houseId), Q.tenantsList(user, undefined, houseId),
   ]);
   const income = pnl.reduce((s, r) => s + r.income, 0);
   const expenses = pnl.reduce((s, r) => s + r.expenses, 0);

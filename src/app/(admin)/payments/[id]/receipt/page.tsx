@@ -1,13 +1,15 @@
 import { notFound } from "next/navigation";
 import { PrintButton } from "@/components/MonthPicker";
 import { fmtDate, rupees } from "@/lib/format";
+import { requireUser } from "@/lib/session";
 import { getSettings } from "@/server/services/common";
 import * as Q from "@/server/services/queries";
 
 export default async function ReceiptPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser();
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const [p, s] = await Promise.all([Q.receipt(id), getSettings()]);
+  const [p, s] = await Promise.all([Q.receipt(user, id), getSettings(user.orgId)]);
   if (!p) notFound();
   const rows: [string, string][] = [
     ["Received from", p.tenantName], ["Room", p.roomNumber], ["Date", fmtDate(p.paidOn)], ["Method", p.method],

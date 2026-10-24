@@ -18,7 +18,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const user = await db.getRepository(User).findOneBy({ email: parsed.data.email.toLowerCase() });
         if (!user || !user.active) return null;
         if (!(await bcrypt.compare(parsed.data.password, user.passwordHash))) return null;
-        return { id: String(user.id), name: user.name, email: user.email, role: user.role } as never;
+        return { id: String(user.id), name: user.name, email: user.email };
       },
     }),
   ],

@@ -10,6 +10,7 @@ import {
   rentForMonth,
   statusFor,
 } from "./billing-core";
+import { paymentFor, tenancyFor } from "./access";
 import { audit, currentMonth, getSettings, today, type Actor } from "./common";
 
 /** Rent for a tenancy in a month: locked override, or the room's rent history. */
@@ -17,18 +18,27 @@ function tenancyRent(t: Tenancy, history: RoomRentHistory[], month: string) {
   return t.rentOverride ? t.monthlyRent : rentForMonth(history, month, t.monthlyRent);
 }
 
+/** Tenancies belong to an organization through room → house. */
+const ORG_TENANCIES = `FROM tenancies y JOIN rooms r ON r.id = y."roomId" JOIN houses h ON h.id = r."houseId" WHERE h."orgId" = $1`;
+
 /**
- * Create any missing RentCharge rows (start month … min(end month, current month)),
- * then let leftover advance payments settle them. Idempotent — safe to call on every page load.
+ * Create any missing RentCharge rows (start month … min(end month, current month)) for one
+ * organization, then let leftover advance payments settle them. Idempotent — safe to call on every page load.
  */
-export async function ensureCharges(): Promise<number> {
+export async function ensureCharges(orgId: number): Promise<number> {
   const db = await getDb();
-  const settings = await getSettings();
+  const settings = await getSettings(orgId);
   const now = currentMonth();
   return db.transaction(async (m) => {
-    const tenancies = await m.getRepository(Tenancy).find();
-    const history = await m.getRepository(RoomRentHistory).find();
-    const existing = await m.getRepository(RentCharge).find({ select: { tenancyId: true, month: true } });
+    const tenancies: Tenancy[] = await m.query(`SELECT y.* ${ORG_TENANCIES}`, [orgId]);
+    const history: RoomRentHistory[] = await m.query(
+      `SELECT rh.* FROM room_rent_history rh JOIN rooms r ON r.id = rh."roomId" JOIN houses h ON h.id = r."houseId" WHERE h."orgId" = $1`,
+      [orgId],
+    );
+    const existing: { tenancyId: number; month: string }[] = await m.query(
+      `SELECT c."tenancyId", c.month FROM rent_charges c WHERE c."tenancyId" IN (SELECT y.id ${ORG_TENANCIES})`,
+      [orgId],
+    );
     const have = new Set(existing.map((c) => `${c.tenancyId}:${c.month}`));
     const toInsert: Partial<RentCharge>[] = [];
     const touched = new Set<number>();
@@ -102,11 +112,10 @@ export interface PaymentInput {
 
 export async function recordPayment(actor: Actor, input: PaymentInput) {
   if (input.amount <= 0) throw new Error("Amount must be greater than zero");
-  await ensureCharges();
+  await ensureCharges(actor.orgId);
   const db = await getDb();
   return db.transaction(async (m) => {
-    const tenancy = await m.getRepository(Tenancy).findOneBy({ id: input.tenancyId });
-    if (!tenancy) throw new Error("Tenancy not found");
+    await tenancyFor(m, actor, input.tenancyId);
     const { chargeId, ...rest } = input;
     const res = await m.getRepository(Payment).insert({ ...rest, recordedById: actor.id });
     const id = res.identifiers[0].id as number;
@@ -119,8 +128,7 @@ export async function recordPayment(actor: Actor, input: PaymentInput) {
 export async function deletePayment(actor: Actor, id: number) {
   const db = await getDb();
   await db.transaction(async (m) => {
-    const p = await m.getRepository(Payment).findOneBy({ id });
-    if (!p) throw new Error("Payment not found");
+    const p = await paymentFor(m, actor, id);
     await m.getRepository(Payment).delete(id); // allocations cascade
     await applyCredit(m, p.tenancyId); // freed money may flow to other charges, then statuses refresh
     await audit(m, actor, "DELETE", "Payment", id, p, null);
@@ -128,8 +136,9 @@ export async function deletePayment(actor: Actor, id: number) {
 }
 
 /** Outstanding on charges, advance credit, and net balance (positive = tenant owes). */
-export async function tenancyBalance(tenancyId: number) {
+export async function tenancyBalance(actor: Actor, tenancyId: number) {
   const db = await getDb();
+  await tenancyFor(db.manager, actor, tenancyId);
   const [r] = await db.query(
     `SELECT
        COALESCE((SELECT SUM("amountDue") FROM rent_charges WHERE "tenancyId" = $1), 0) AS charged,
@@ -142,8 +151,8 @@ export async function tenancyBalance(tenancyId: number) {
 }
 
 /** Called when a tenancy ends: re-price the final month and drop charges after it. */
-export async function adjustChargesOnMoveOut(m: EntityManager, t: Tenancy, endDate: string) {
-  const settings = await getSettings();
+export async function adjustChargesOnMoveOut(m: EntityManager, orgId: number, t: Tenancy, endDate: string) {
+  const settings = await getSettings(orgId);
   const history = await m.getRepository(RoomRentHistory).findBy({ roomId: t.roomId });
   const endMonth = monthOf(endDate);
   const charges = await m.getRepository(RentCharge).findBy({ tenancyId: t.id });
@@ -168,6 +177,15 @@ export async function adjustChargesOnMoveOut(m: EntityManager, t: Tenancy, endDa
     }
   }
   await applyCredit(m, t.id);
+}
+
+/** Cron entry point: every organization. */
+export async function ensureChargesAll(): Promise<number> {
+  const db = await getDb();
+  const orgs: { id: number }[] = await db.query(`SELECT id FROM organizations`);
+  let created = 0;
+  for (const o of orgs) created += await ensureCharges(o.id);
+  return created;
 }
 
 export { today };

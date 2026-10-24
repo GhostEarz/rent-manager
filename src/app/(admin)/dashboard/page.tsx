@@ -4,7 +4,9 @@ import { PaymentDialog } from "@/components/forms";
 import { MonthPicker } from "@/components/MonthPicker";
 import { Badge, Empty, PageHeader, Stat } from "@/components/ui";
 import { activeHouseId } from "@/lib/house";
+import { requireUser } from "@/lib/session";
 import { fmtDate, fmtMonth, rupees, waLink } from "@/lib/format";
+import * as A from "@/server/services/analytics";
 import { currentMonth } from "@/server/services/common";
 import * as Q from "@/server/services/queries";
 
@@ -18,10 +20,12 @@ const tileTone: Record<string, string> = {
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const month = (await searchParams).month?.match(/^\d{4}-\d{2}$/)?.[0] ?? currentMonth();
-  const houseId = (await activeHouseId()) ?? undefined;
-  const [k, tiles, trend, cats, late, pays, exps, options] = await Promise.all([
-    Q.kpis(month, houseId), Q.roomTiles(month, houseId), Q.trend(month), Q.expensesByCategory(month), Q.overdue(),
-    Q.recentPayments(), Q.recentExpenses(), Q.activeTenancyOptions(),
+  const user = await requireUser();
+  const houseId = await activeHouseId(user);
+  const [k, tiles, trend, cats, late, pays, exps, options, byHouse] = await Promise.all([
+    Q.kpis(user, month, houseId), Q.roomTiles(user, month, houseId), Q.trend(user, month, houseId), Q.expensesByCategory(user, month, houseId),
+    Q.overdue(user, houseId), Q.recentPayments(user, 6, houseId), Q.recentExpenses(user, 6, houseId), Q.activeTenancyOptions(user, houseId),
+    A.revenueByHouse(user, A.monthFilter(month, { houseId: houseId ?? undefined })),
   ]);
   const floors = [...new Set(tiles.map((t) => t.floorNumber))];
   return (
@@ -33,14 +37,32 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Revenue (received)" value={rupees(k.received)} tone="good" sub={k.dailyReceived > 0 ? `Daily stays ${rupees(k.dailyReceived)}` : undefined} />
         <Stat label="Expected rent" value={rupees(k.expected)} />
         <Stat label="Collected" value={rupees(k.collected)} tone="good" />
         <Stat label="Pending" value={rupees(k.pending)} tone={k.pending > 0 ? "bad" : undefined} />
         <Stat label="Occupancy (monthly)" value={`${k.occupied}/${k.totalRooms}`} />
         <Stat label="Expenses" value={rupees(k.expenses)} />
-        <Stat label="Net income" value={rupees(k.net)} tone={k.net >= 0 ? "good" : "bad"} sub={`Received ${rupees(k.received)}`} />
-        {k.dailyReceived > 0 && <Stat label="Daily stay revenue" value={rupees(k.dailyReceived)} tone="good" sub="This month" />}
+        <Stat label="Net profit" value={rupees(k.net)} tone={k.net >= 0 ? "good" : "bad"} sub="Received − expenses" />
       </div>
+
+      {byHouse.length > 1 && (
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold">Buildings</h2>
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {byHouse.map((h: any) => (
+              <Link key={h.houseId} href={`/buildings/${h.houseId}?month=${month}`} className="card block transition hover:shadow-md">
+                <p className="font-semibold">{h.houseName}</p>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                  <div><p className="text-muted">Revenue</p><p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{rupees(h.revenue)}</p></div>
+                  <div><p className="text-muted">Expenses</p><p className="text-sm font-medium">{rupees(h.expenses)}</p></div>
+                  <div><p className="text-muted">Net</p><p className={`text-sm font-medium ${h.net < 0 ? "text-red-600" : ""}`}>{rupees(h.net)}</p></div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mt-6">
         <h2 className="mb-2 text-sm font-semibold">Rooms</h2>
@@ -56,9 +78,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               {tiles.filter((t) => t.floorNumber === f).map((t) => {
                 const st = t.chargeStatus ?? (t.roomStatus === "MAINTENANCE" ? "MAINTENANCE" : "VACANT");
                 return (
-                  <Link key={`${t.id}-${t.tenantId}`} href={t.tenantId ? `/tenants/${t.tenantId}` : "/rooms"} className={`rounded-xl border p-3 transition hover:shadow-md ${tileTone[st]}`}>
+                  <Link key={`${t.id}-${t.tenantId}`} href={t.tenantId && t.rentalType === "MONTHLY" ? `/tenants/${t.tenantId}` : `/rooms/${t.id}`} className={`rounded-xl border p-3 transition hover:shadow-md ${tileTone[st]}`}>
                     <span className="text-lg font-semibold">{t.number}</span>
-                    <p className="truncate text-xs">{t.tenantName ?? (st === "MAINTENANCE" ? "Maintenance" : "Vacant")}</p>
+                    <p className="truncate text-xs">{t.tenantName ?? (st === "MAINTENANCE" ? "Maintenance" : t.rentalType === "DAILY" ? "Daily room" : "Vacant")}</p>
                     {t.amountDue != null && <p className="mt-1 text-xs text-muted">{rupees(t.paid)} / {rupees(t.amountDue)}</p>}
                   </Link>
                 );

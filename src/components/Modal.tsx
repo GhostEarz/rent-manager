@@ -5,12 +5,12 @@ const Ctx = createContext<(() => void) | null>(null);
 export const useCloseModal = () => useContext(Ctx);
 
 export function Modal({
-  trigger, title, children, variant = "", small = false,
+  trigger, title, children, variant = "", small = false, defaultOpen = false,
 }: {
-  trigger: React.ReactNode; title: string; children: React.ReactNode; variant?: "primary" | "danger" | ""; small?: boolean;
+  trigger: React.ReactNode; title: string; children: React.ReactNode; variant?: "primary" | "danger" | ""; small?: boolean; defaultOpen?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   useEffect(() => {
     const d = ref.current;
     if (!d) return;

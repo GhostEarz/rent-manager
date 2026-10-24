@@ -4,30 +4,30 @@ import {
 import { ActionForm, ConfirmAction } from "@/components/ActionForm";
 import { Modal } from "@/components/Modal";
 import { Badge, Field, PageHeader, Row } from "@/components/ui";
-import { requireAdmin } from "@/lib/session";
+import { requireOwnerPage } from "@/lib/session";
 import * as Q from "@/server/services/queries";
 
 export default async function PropertiesPage() {
-  await requireAdmin();
-  const [locations, houses] = await Promise.all([Q.listLocations(), Q.listHouses()]);
+  const user = await requireOwnerPage();
+  const [locations, houses] = await Promise.all([Q.listLocations(user), Q.listHouses(user)]);
 
   return (
     <>
-      <PageHeader title="Properties" sub={`${locations.length} locations · ${houses.length} houses`}>
+      <PageHeader title="Locations & buildings" sub={`${locations.length} locations · ${houses.length} buildings`}>
         <Modal trigger="Add location" title="Add location">
           <ActionForm action={addLocationAction}>
-            <Field label="Name"><input name="name" required className="input" placeholder="Kochi" /></Field>
+            <Field label="Name"><input name="name" required className="input" placeholder="Kazhakuttom" /></Field>
             <Field label="Notes"><input name="notes" className="input" /></Field>
           </ActionForm>
         </Modal>
-        <Modal trigger="Add house" title="Add house" variant="primary">
+        <Modal trigger="Add building" title="Add building" variant="primary">
           <ActionForm action={addHouseAction}>
             <Field label="Location">
               <select name="locationId" required className="input">
                 {locations.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </Field>
-            <Field label="House name"><input name="name" required className="input" placeholder="Green Villa" /></Field>
+            <Field label="Building name"><input name="name" required className="input" placeholder="Green Villa" /></Field>
             <Field label="Address"><input name="address" className="input" /></Field>
           </ActionForm>
         </Modal>
@@ -67,7 +67,7 @@ export default async function PropertiesPage() {
                           {locations.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
                         </select>
                       </Field>
-                      <Field label="House name"><input name="name" required defaultValue={h.name} className="input" /></Field>
+                      <Field label="Building name"><input name="name" required defaultValue={h.name} className="input" /></Field>
                       <Field label="Address"><input name="address" defaultValue={h.address ?? ""} className="input" /></Field>
                       <Field label="Status">
                         <select name="active" defaultValue={h.active ? "true" : "false"} className="input">

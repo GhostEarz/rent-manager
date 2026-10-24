@@ -2,11 +2,15 @@ import Link from "next/link";
 import { TenantDialog } from "@/components/forms";
 import { Badge, Empty, PageHeader, TableWrap } from "@/components/ui";
 import { fmtDate, rupees } from "@/lib/format";
+import { activeHouseId } from "@/lib/house";
+import { requireUser } from "@/lib/session";
 import * as Q from "@/server/services/queries";
 
 export default async function TenantsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const user = await requireUser();
+  const houseId = await activeHouseId(user);
   const search = (await searchParams).q?.trim();
-  const rows = await Q.tenantsList(search);
+  const [rows, houses] = await Promise.all([Q.tenantsList(user, search, houseId), Q.houseOptions(user)]);
   return (
     <>
       <PageHeader title="Tenants" sub={`${rows.length} shown`}>
@@ -14,7 +18,7 @@ export default async function TenantsPage({ searchParams }: { searchParams: Prom
           <input name="q" defaultValue={search} placeholder="Search name, phone, room" className="input w-52" />
           <button className="btn">Search</button>
         </form>
-        <TenantDialog label="Add tenant" />
+        <TenantDialog label="Add tenant" houses={houses as never} defaultHouseId={houseId} />
       </PageHeader>
       <TableWrap>
         {rows.length === 0 ? <Empty>No tenants found.</Empty> : (

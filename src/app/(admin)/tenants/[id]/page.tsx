@@ -12,13 +12,13 @@ import * as Q from "@/server/services/queries";
 
 export default async function TenantPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requireUser();
-  const admin = user.role === "ADMIN";
+  const admin = user.role === "OWNER";
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const d = await Q.tenantDetail(id);
+  const d = await Q.tenantDetail(user, id);
   if (!d) notFound();
   const { tenant: t, tenancies, charges, payments } = d;
-  const [vacant, options] = await Promise.all([Q.vacantRooms(), Q.activeTenancyOptions()]);
+  const [vacant, options] = await Promise.all([Q.vacantRooms(user), Q.activeTenancyOptions(user)]);
   const active = tenancies.find((y: any) => y.status === "ACTIVE");
 
   return (

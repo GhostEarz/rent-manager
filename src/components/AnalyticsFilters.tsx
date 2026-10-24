@@ -27,7 +27,7 @@ export function AnalyticsFilters({
         {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
       </select>
       <select aria-label="House" className="input w-auto" value={sp.get("houseId") ?? ""} onChange={(e) => set("houseId", e.target.value)}>
-        <option value="">All houses</option>
+        <option value="">All buildings</option>
         {houses.map((h) => <option key={h.id} value={h.id}>{h.locationName} — {h.name}</option>)}
       </select>
       <select aria-label="Rental type" className="input w-auto" value={sp.get("rentalType") ?? ""} onChange={(e) => set("rentalType", e.target.value)}>

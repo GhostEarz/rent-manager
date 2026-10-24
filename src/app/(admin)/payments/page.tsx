@@ -15,7 +15,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     from: sp.from || undefined, to: sp.to || undefined, method: sp.method || undefined,
     tenantId: sp.tenantId ? Number(sp.tenantId) : undefined, roomId: sp.roomId ? Number(sp.roomId) : undefined,
   };
-  const [rows, tenants, rooms] = await Promise.all([Q.paymentsLedger(filter), Q.tenantOptions(), Q.listRooms()]);
+  const [rows, tenants, rooms] = await Promise.all([Q.paymentsLedger(user, filter), Q.tenantOptions(user), Q.listRooms(user)]);
   const qs = new URLSearchParams(Object.entries(sp).filter(([, v]) => v) as [string, string][]).toString();
   return (
     <>
@@ -52,7 +52,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                   <td className="text-right font-medium">{rupees(p.amount)}</td>
                   <td className="space-x-1 whitespace-nowrap text-right">
                     <Link className="btn btn-sm" href={`/payments/${p.id}/receipt`}>Receipt</Link>
-                    {user.role === "ADMIN" && <ConfirmAction action={deletePaymentAction} fields={{ id: p.id }} label="Delete" confirm="Delete this payment?" />}
+                    {user.role === "OWNER" && <ConfirmAction action={deletePaymentAction} fields={{ id: p.id }} label="Delete" confirm="Delete this payment?" />}
                   </td>
                 </tr>
               ))}

@@ -1,13 +1,15 @@
 import { notFound } from "next/navigation";
 import { PrintButton } from "@/components/MonthPicker";
 import { fmtDate, fmtMonth, rupees } from "@/lib/format";
+import { requireUser } from "@/lib/session";
 import { getSettings } from "@/server/services/common";
 import * as Q from "@/server/services/queries";
 
 export default async function StatementPage({ params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUser();
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const [d, s] = await Promise.all([Q.tenantStatement(id), getSettings()]);
+  const [d, s] = await Promise.all([Q.tenantStatement(user, id), getSettings(user.orgId)]);
   if (!d) notFound();
   return (
     <div className="card mx-auto max-w-3xl space-y-4">

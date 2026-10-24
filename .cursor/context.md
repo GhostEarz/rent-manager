@@ -8,6 +8,9 @@
 | Daily rentals use a separate `stays`/`stay_payments` ledger, no `rent_charges` | Nightly billing (`dailyRate × nights`) doesn't fit the monthly charge-generation model; keeps the two ledgers independent so neither query path has to special-case the other (Oct 2026) |
 | `analytics.ts` centralizes portfolio-wide SQL; dashboard/reports keep their own simpler house-scoped queries | Avoids duplicating "monthly + daily revenue" unification logic across pages; see `docs/analytics.md` for revenue definitions (Oct 2026) |
 
+| Org-scoped multi-tenancy in the service layer (`Actor.houseIds`), not DB row-level security | Keeps the existing TypeORM/Auth.js stack; every read/write filters on the actor's visible houses, covered by `multitenancy.test.ts` (Oct 2026) |
+| Entity class names pinned with `Object.defineProperty` in `entities/core.ts` | String relation targets break when production bundles minify class names (Oct 2026) |
+
 ## Current State (Oct 2026)
 
 - Monthly rent receipts: download from Rent collection page; HTML bundle per tenant charge; cached blob unless **Refresh archive**

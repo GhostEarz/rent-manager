@@ -1,10 +1,30 @@
 import type { EntityManager } from "typeorm";
 import { getDb } from "../db/data-source";
-import { AuditLog, Setting } from "../entities/core";
+import { AuditLog, Setting, type Role } from "../entities/core";
 
+/**
+ * The signed-in user as services see them. `houseIds` is the complete set of houses this user may
+ * touch — every house in the organization for an OWNER, only the assigned ones for a MANAGER.
+ * Every read and write goes through it, so tenant (org) isolation and manager scoping live in one place.
+ */
 export interface Actor {
   id: number | null;
   name: string;
+  orgId: number;
+  role: Role;
+  houseIds: number[];
+}
+
+export const isOwner = (a: Actor) => a.role === "OWNER";
+
+export function assertHouse(a: Actor, houseId: number) {
+  if (!a.houseIds.includes(houseId)) throw new Error("You don't have access to that building");
+}
+
+/** House ids a query may touch: the actor's, optionally narrowed to one house they can see. */
+export function scopeHouses(a: Actor, houseId?: number | null): number[] {
+  if (!houseId) return a.houseIds;
+  return a.houseIds.includes(houseId) ? [houseId] : [];
 }
 
 /** Today's date in India (the property's timezone), as YYYY-MM-DD. */
@@ -23,6 +43,7 @@ export async function audit(
   after: unknown,
 ) {
   await m.getRepository(AuditLog).insert({
+    orgId: actor.orgId,
     userId: actor.id,
     userName: actor.name,
     action,
@@ -42,9 +63,9 @@ export interface AppSettings {
 
 const DEFAULTS: AppSettings = { propertyName: "My Building", propertyAddress: "", dueDay: 5, prorate: true };
 
-export async function getSettings(): Promise<AppSettings> {
+export async function getSettings(orgId: number): Promise<AppSettings> {
   const db = await getDb();
-  const rows = await db.getRepository(Setting).find();
+  const rows = await db.getRepository(Setting).findBy({ orgId });
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   return {
     propertyName: map.propertyName ?? DEFAULTS.propertyName,
@@ -57,9 +78,9 @@ export async function getSettings(): Promise<AppSettings> {
 export async function saveSettings(actor: Actor, s: AppSettings) {
   const db = await getDb();
   await db.transaction(async (m) => {
-    const before = await getSettings();
+    const before = await getSettings(actor.orgId);
     for (const [key, value] of Object.entries(s)) {
-      await m.getRepository(Setting).save({ key, value: String(value) });
+      await m.getRepository(Setting).save({ orgId: actor.orgId, key, value: String(value) });
     }
     await audit(m, actor, "UPDATE", "Settings", null, before, s);
   });

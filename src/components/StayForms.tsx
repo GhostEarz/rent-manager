@@ -1,20 +1,27 @@
-import { checkInStayAction, checkOutStayAction, recordStayPaymentAction } from "@/actions/stays";
+import { checkInStayAction, checkOutStayAction, recordStayPaymentAction, startBookedStayAction } from "@/actions/stays";
 import { ActionForm } from "./ActionForm";
 import { Modal } from "./Modal";
 import { Field, Row, todayStr } from "./ui";
 
-export function CheckInStayDialog({ rooms }: { rooms: { id: number; number: string; dailyRate: number }[] }) {
+export function CheckInStayDialog({
+  rooms, roomId, label = "Add booking / check-in", checkIn, small = false, defaultOpen = false,
+}: {
+  rooms: { id: number; number: string; dailyRate: number; houseName?: string }[];
+  roomId?: number; label?: string; checkIn?: string; small?: boolean; defaultOpen?: boolean;
+}) {
   return (
-    <Modal trigger="Check in guest" title="Check in guest" variant="primary">
-      <ActionForm action={checkInStayAction} submit="Check in">
+    <Modal trigger={label} title="Daily stay" variant="primary" small={small} defaultOpen={defaultOpen}>
+      <ActionForm action={checkInStayAction} submit="Save">
+        <p className="text-xs text-muted">Pick the nights the room is taken. Check-out is the morning the guest leaves, so that night is free for the next guest. A future check-in date reserves the room; leave check-out empty for an open-ended stay starting today or earlier.</p>
+        <Field label="Room">
+          <select name="roomId" required className="input" defaultValue={roomId ?? ""}>
+            <option value="" disabled>Select…</option>
+            {rooms.map((r) => <option key={r.id} value={r.id}>{r.houseName ? `${r.houseName} · ` : ""}Room {r.number} (₹{r.dailyRate}/night)</option>)}
+          </select>
+        </Field>
         <Row>
-          <Field label="Room">
-            <select name="roomId" required className="input" defaultValue="">
-              <option value="" disabled>Select…</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.number} (₹{r.dailyRate}/night)</option>)}
-            </select>
-          </Field>
-          <Field label="Check-in"><input name="checkIn" type="date" required defaultValue={todayStr()} className="input" /></Field>
+          <Field label="Check-in"><input name="checkIn" type="date" required defaultValue={checkIn ?? todayStr()} className="input" /></Field>
+          <Field label="Check-out"><input name="checkOut" type="date" className="input" /></Field>
         </Row>
         <Row>
           <Field label="Guest name"><input name="guestName" required className="input" /></Field>
@@ -24,6 +31,14 @@ export function CheckInStayDialog({ rooms }: { rooms: { id: number; number: stri
         <Field label="Notes"><input name="notes" className="input" /></Field>
       </ActionForm>
     </Modal>
+  );
+}
+
+export function ArriveStayButton({ id }: { id: number }) {
+  return (
+    <ActionForm action={startBookedStayAction} submit="Check in" inline>
+      <input type="hidden" name="id" value={id} />
+    </ActionForm>
   );
 }
 

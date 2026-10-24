@@ -1,4 +1,4 @@
-import { ensureCharges } from "@/server/services/billing";
+import { ensureChargesAll } from "@/server/services/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 async function handle(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return new Response("Unauthorized", { status: 401 });
-  const created = await ensureCharges();
+  const created = await ensureChargesAll();
   return Response.json({ created });
 }
 export const GET = handle;

@@ -1,12 +1,13 @@
 import { cookies } from "next/headers";
+import type { Actor } from "@/server/services/common";
 
 const COOKIE = "houseId";
 
-/** Active house for the signed-in user, or null for "all houses" / not yet chosen. */
-export async function activeHouseId(): Promise<number | null> {
+/** Active house for the signed-in user, or null for "all my buildings". Ignores a cookie the user can't access. */
+export async function activeHouseId(a: Actor): Promise<number | null> {
   const v = (await cookies()).get(COOKIE)?.value;
   const n = v ? Number(v) : NaN;
-  return Number.isInteger(n) && n > 0 ? n : null;
+  return Number.isInteger(n) && a.houseIds.includes(n) ? n : null;
 }
 
 export async function setActiveHouseId(houseId: number | null) {

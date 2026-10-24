@@ -12,10 +12,18 @@ import {
 // Columns declare explicit types (no emitDecoratorMetadata). Relations use
 // string targets so entity modules never import each other at runtime.
 
-export type Role = "ADMIN" | "STAFF";
+export type Role = "OWNER" | "MANAGER";
 export type RoomStatus = "VACANT" | "OCCUPIED" | "MAINTENANCE";
 export type RentalType = "MONTHLY" | "DAILY";
-export type StayStatus = "ACTIVE" | "ENDED" | "CANCELLED";
+/** BOOKED = reserved dates not yet checked in; ACTIVE = guest in room; ENDED/CANCELLED are closed. */
+export type StayStatus = "BOOKED" | "ACTIVE" | "ENDED" | "CANCELLED";
+
+@Entity("organizations")
+export class Organization {
+  @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "varchar", length: 120 }) name!: string;
+  @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
+}
 
 @Entity("users")
 export class User {
@@ -23,7 +31,8 @@ export class User {
   @Column({ type: "varchar", length: 120 }) name!: string;
   @Column({ type: "varchar", length: 200, unique: true }) email!: string;
   @Column({ type: "varchar", length: 200 }) passwordHash!: string;
-  @Column({ type: "varchar", length: 10, default: "STAFF" }) role!: Role;
+  @Column({ type: "int" }) orgId!: number;
+  @Column({ type: "varchar", length: 10, default: "MANAGER" }) role!: Role;
   @Column({ type: "boolean", default: true }) active!: boolean;
   @CreateDateColumn({ type: "timestamptz" }) createdAt!: Date;
 }
@@ -31,6 +40,7 @@ export class User {
 @Entity("locations")
 export class Location {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) orgId!: number;
   @Column({ type: "varchar", length: 120 }) name!: string;
   @Column({ type: "text", nullable: true }) notes!: string | null;
 }
@@ -38,6 +48,7 @@ export class Location {
 @Entity("houses")
 export class House {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) orgId!: number;
   @Column({ type: "int" }) locationId!: number;
   @ManyToOne("Location", { onDelete: "RESTRICT" })
   @JoinColumn({ name: "locationId" })
@@ -45,6 +56,13 @@ export class House {
   @Column({ type: "varchar", length: 120 }) name!: string;
   @Column({ type: "text", nullable: true }) address!: string | null;
   @Column({ type: "boolean", default: true }) active!: boolean;
+}
+
+/** Which houses a MANAGER may see. Owners implicitly see every house in their organization. */
+@Entity("user_houses")
+export class UserHouse {
+  @PrimaryColumn({ type: "int" }) userId!: number;
+  @PrimaryColumn({ type: "int" }) houseId!: number;
 }
 
 @Entity("floors")
@@ -94,6 +112,9 @@ export class RoomRentHistory {
 @Entity("tenants")
 export class Tenant {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) orgId!: number;
+  /** House the tenant belongs to (kept in step with their active room); drives manager visibility. */
+  @Column({ type: "int" }) houseId!: number;
   @Column({ type: "varchar", length: 120 }) name!: string;
   @Column({ type: "varchar", length: 30, nullable: true }) phone!: string | null;
   @Column({ type: "varchar", length: 200, nullable: true }) email!: string | null;
@@ -211,14 +232,17 @@ export class StayPayment {
 }
 
 @Entity("expense_categories")
+@Unique(["orgId", "name"])
 export class ExpenseCategory {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
-  @Column({ type: "varchar", length: 80, unique: true }) name!: string;
+  @Column({ type: "int" }) orgId!: number;
+  @Column({ type: "varchar", length: 80 }) name!: string;
 }
 
 @Entity("expenses")
 export class Expense {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int" }) houseId!: number;
   @Column({ type: "int" }) categoryId!: number;
   @ManyToOne("ExpenseCategory", { onDelete: "RESTRICT" })
   @JoinColumn({ name: "categoryId" })
@@ -240,6 +264,7 @@ export class Expense {
 @Entity("audit_logs")
 export class AuditLog {
   @PrimaryGeneratedColumn({ type: "int" }) id!: number;
+  @Column({ type: "int", nullable: true }) orgId!: number | null;
   @Column({ type: "int", nullable: true }) userId!: number | null;
   @Column({ type: "varchar", length: 120, nullable: true }) userName!: string | null;
   @Column({ type: "varchar", length: 40 }) action!: string;
@@ -252,11 +277,21 @@ export class AuditLog {
 
 @Entity("settings")
 export class Setting {
+  @PrimaryColumn({ type: "int" }) orgId!: number;
   @PrimaryColumn({ type: "varchar", length: 60 }) key!: string;
   @Column({ type: "text" }) value!: string;
 }
 
 export const ALL_ENTITIES = [
-  User, Location, House, Floor, Room, RoomRentHistory, Tenant, Tenancy, RentCharge,
+  Organization, User, UserHouse, Location, House, Floor, Room, RoomRentHistory, Tenant, Tenancy, RentCharge,
   Payment, PaymentAllocation, Stay, StayPayment, ExpenseCategory, Expense, AuditLog, Setting,
 ];
+
+// Relations use string targets ("Location", …) which TypeORM matches against the class name. Production
+// bundles minify class names, so pin them explicitly or entity metadata lookup fails at runtime.
+for (const [name, cls] of Object.entries({
+  Organization, User, UserHouse, Location, House, Floor, Room, RoomRentHistory, Tenant, Tenancy, RentCharge,
+  Payment, PaymentAllocation, Stay, StayPayment, ExpenseCategory, Expense, AuditLog, Setting,
+})) {
+  Object.defineProperty(cls, "name", { value: name });
+}

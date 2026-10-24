@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useActionState } from "react";
 import { loginAction } from "@/actions/auth";
 
@@ -17,6 +18,7 @@ export default function LoginPage() {
           <input name="password" type="password" required autoComplete="current-password" className="input" /></label>
         {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
         <button disabled={pending} className="btn btn-primary w-full">{pending ? "Signing in…" : "Sign in"}</button>
+        <p className="text-center text-sm text-muted">New here? <Link href="/signup" className="text-indigo-600 hover:underline">Create an account</Link></p>
       </form>
     </main>
   );

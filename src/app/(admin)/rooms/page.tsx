@@ -2,6 +2,7 @@ import { addFloorAction, addRoomAction, changeRentAction, changeRentalTypeAction
 import { ActionForm, ConfirmAction } from "@/components/ActionForm";
 import { Modal } from "@/components/Modal";
 import { Badge, Field, PageHeader, Row, todayStr } from "@/components/ui";
+import Link from "next/link";
 import { activeHouseId } from "@/lib/house";
 import { fmtDate, rupees } from "@/lib/format";
 import { requireUser } from "@/lib/session";
@@ -9,18 +10,20 @@ import * as Q from "@/server/services/queries";
 
 export default async function RoomsPage() {
   const user = await requireUser();
-  const admin = user.role === "ADMIN";
-  const houseId = (await activeHouseId()) ?? undefined;
-  const [rooms, floors] = await Promise.all([Q.listRooms(houseId), Q.listFloors(houseId)]);
-  const history = Object.fromEntries(await Promise.all(rooms.map(async (r) => [r.id, await Q.roomRentHistory(r.id)] as const)));
+  const admin = user.role === "OWNER";
+  const houseId = await activeHouseId(user);
+  const [rooms, floors, houses] = await Promise.all([Q.listRooms(user, houseId), Q.listFloors(user, houseId), Q.houseOptions(user)]);
+  const houseName = new Map(houses.map((h: any) => [h.id, h.name as string]));
+  const history = Object.fromEntries(await Promise.all(rooms.map(async (r) => [r.id, await Q.roomRentHistory(user, r.id)] as const)));
+  const addTo = houseId ?? (houses.length === 1 ? (houses[0] as any).id : undefined);
 
   return (
     <>
       <PageHeader title="Rooms" sub={`${rooms.length} rooms on ${floors.length} floors`}>
-        {admin && houseId && (
+        {addTo && (
           <Modal trigger="Add floor" title="Add floor">
             <ActionForm action={addFloorAction}>
-              <input type="hidden" name="houseId" value={houseId} />
+              <input type="hidden" name="houseId" value={addTo} />
               <Row>
                 <Field label="Number"><input name="number" type="number" required className="input" defaultValue={floors.length + 1} /></Field>
                 <Field label="Name"><input name="name" required className="input" placeholder="Floor 3" /></Field>
@@ -33,7 +36,7 @@ export default async function RoomsPage() {
             <Row>
               <Field label="Room number"><input name="number" required className="input" placeholder="108" /></Field>
               <Field label="Floor">
-                <select name="floorId" required className="input">{floors.map((f: any) => <option key={f.id} value={f.id}>{f.name}</option>)}</select>
+                <select name="floorId" required className="input">{floors.map((f: any) => <option key={f.id} value={f.id}>{houses.length > 1 ? `${houseName.get(f.houseId)} · ` : ""}{f.name}</option>)}</select>
               </Field>
             </Row>
             <Row>
@@ -53,7 +56,7 @@ export default async function RoomsPage() {
       {floors.map((f) => (
         <section key={f.id} className="mb-6">
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold">{f.name}</h2>
+            <h2 className="text-sm font-semibold">{houses.length > 1 && <span className="text-muted">{houseName.get(f.houseId)} · </span>}{f.name}</h2>
             {admin && (
               <div className="flex gap-1">
                 <Modal trigger="Rename" title="Edit floor" small>
@@ -76,7 +79,7 @@ export default async function RoomsPage() {
               <div key={r.id} className="card space-y-2">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-lg font-semibold">Room {r.number}</p>
+                    <Link href={`/rooms/${r.id}`} className="text-lg font-semibold hover:underline">Room {r.number}</Link>
                     <p className="text-sm text-muted">{r.tenantName ?? "No tenant"}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -87,13 +90,14 @@ export default async function RoomsPage() {
                 <p className="text-xl font-semibold">{rupees(r.currentRent)}<span className="text-xs font-normal text-muted"> / {r.rentalType === "DAILY" ? "night" : "month"}</span></p>
                 {r.notes && <p className="text-xs text-muted">{r.notes}</p>}
                 <div className="flex flex-wrap gap-1">
+                  <Link href={`/rooms/${r.id}`} className="btn btn-sm">{r.rentalType === "DAILY" ? "Calendar" : "Open"}</Link>
                   <Modal trigger="Edit" title={`Edit room ${r.number}`} small>
                     <ActionForm action={updateRoomAction}>
                       <input type="hidden" name="id" value={r.id} />
                       <Row>
                         <Field label="Room number"><input name="number" required defaultValue={r.number} className="input" /></Field>
                         <Field label="Floor">
-                          <select name="floorId" defaultValue={r.floorId} className="input">{floors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+                          <select name="floorId" defaultValue={r.floorId} className="input">{floors.filter((x: any) => x.houseId === r.houseId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
                         </Field>
                       </Row>
                       <Field label="Status">

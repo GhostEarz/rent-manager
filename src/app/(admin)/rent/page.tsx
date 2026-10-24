@@ -3,16 +3,20 @@ import { PaymentDialog } from "@/components/forms";
 import { MonthPicker } from "@/components/MonthPicker";
 import { Badge, Empty, PageHeader, Stat, TableWrap } from "@/components/ui";
 import { fmtDate, fmtMonth, rupees } from "@/lib/format";
+import { activeHouseId } from "@/lib/house";
+import { requireUser } from "@/lib/session";
 import { currentMonth } from "@/server/services/common";
 import * as Q from "@/server/services/queries";
 
 const FILTERS = ["", "UNPAID", "PARTIAL", "PAID"] as const;
 
 export default async function RentPage({ searchParams }: { searchParams: Promise<{ month?: string; status?: string }> }) {
+  const user = await requireUser();
+  const houseId = await activeHouseId(user);
   const sp = await searchParams;
   const month = sp.month?.match(/^\d{4}-\d{2}$/)?.[0] ?? currentMonth();
   const status = FILTERS.includes(sp.status as never) ? sp.status || undefined : undefined;
-  const [all, options] = await Promise.all([Q.rentTable(month), Q.activeTenancyOptions()]);
+  const [all, options] = await Promise.all([Q.rentTable(user, month, undefined, houseId), Q.activeTenancyOptions(user, houseId)]);
   const rows = status ? all.filter((r) => r.status === status) : all;
   const due = all.reduce((s, r) => s + r.amountDue, 0);
   const paid = all.reduce((s, r) => s + r.paid, 0);
@@ -21,10 +25,14 @@ export default async function RentPage({ searchParams }: { searchParams: Promise
     <>
       <PageHeader title="Rent collection" sub={fmtMonth(month)}>
         <MonthPicker value={month} />
-        <a className="btn" href={`/api/receipts/monthly?month=${month}`}>Download receipts</a>
-        <a className="btn btn-sm" href={`/api/receipts/monthly?month=${month}&refresh=1`} title="Regenerate and save a fresh copy on Vercel Blob">
-          Refresh archive
-        </a>
+        {user.role === "OWNER" && (
+          <>
+            <a className="btn" href={`/api/receipts/monthly?month=${month}`}>Download receipts</a>
+            <a className="btn btn-sm" href={`/api/receipts/monthly?month=${month}&refresh=1`} title="Regenerate and save a fresh copy on Vercel Blob">
+              Refresh archive
+            </a>
+          </>
+        )}
         <PaymentDialog options={options as never} />
       </PageHeader>
       <div className="mb-4 grid grid-cols-3 gap-3">
