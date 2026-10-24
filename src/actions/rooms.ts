@@ -1,4 +1,5 @@
 "use server";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { run } from "@/lib/action";
 import { requireOwner, requireUser } from "@/lib/session";
@@ -46,6 +47,12 @@ export async function deleteRoomAction(_: unknown, fd: FormData) {
     const u = await requireOwner();
     await rooms.deleteRoom(u, id.parse(fd.get("id")));
   });
+}
+/** Delete from the room's own page, then leave it (the page would 404 otherwise). */
+export async function deleteRoomAndLeaveAction(_: unknown, fd: FormData) {
+  const res = await deleteRoomAction(_, fd);
+  if (res.error) return res;
+  redirect(`/buildings/${id.parse(fd.get("houseId"))}`);
 }
 export async function changeRentAction(_: unknown, fd: FormData) {
   return run(async () => {
