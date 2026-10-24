@@ -48,12 +48,16 @@ Other scripts: `npm test` (billing unit tests; plus the multi-tenant integration
    ```
 5. `vercel.json` registers a monthly cron for the charge job (Vercel sends `Authorization: Bearer $CRON_SECRET`).
 
+## Docker / Render / Koyeb / any container host
+
+`docker build -t rent-manager .` produces an image that installs with pnpm (frozen lockfile), builds the standalone Next.js server, and on start runs `pnpm migration:run` (idempotent) before `node standalone/server.js`. Set `DATABASE_URL`, `DB_SSL=true` (for Neon/RDS), `AUTH_SECRET`, `CRON_SECRET` and `AUTH_TRUST_HOST=true` as environment variables; the container listens on port 3000. On Render choose **New → Web Service → Docker** and point it at the repo.
+
 ## Migrating to AWS / Render / a VPS
 
 Nothing here is Vercel-specific.
 
 1. **Database:** `pg_dump -Fc "$OLD_URL" > rm.dump` → `pg_restore --no-owner -d "$RDS_URL" rm.dump`. Set `DATABASE_URL` (and `DB_SSL=true` for RDS).
-2. **App:** `docker build -t rent-manager .` and run it on App Runner / ECS / Lightsail / any VPS with `DATABASE_URL`, `DB_SSL`, `AUTH_SECRET`, `CRON_SECRET`, `AUTH_TRUST_HOST=true`. Run `npm run migration:run` from CI or a one-off task for schema changes.
+2. **App:** run the Docker image on App Runner / ECS / Lightsail / any VPS with `DATABASE_URL`, `DB_SSL`, `AUTH_SECRET`, `CRON_SECRET`, `AUTH_TRUST_HOST=true`. Migrations run automatically when the container starts.
 3. **Cron:** an EventBridge rule (or any cron) calling
    `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://your-host/api/cron/generate-charges`.
 4. **Attachments:** expenses/tenants store plain links today; to host files add an S3 adapter behind a small `storage.ts` interface.
