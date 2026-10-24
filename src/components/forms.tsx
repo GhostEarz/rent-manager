@@ -41,12 +41,18 @@ export function PaymentDialog({
           </Field>
           <Field label="Reference no."><input name="referenceNo" className="input" /></Field>
         </Row>
-        <Field label="Apply to">
-          <select name="chargeId" className="input" defaultValue={charge?.id ?? ""}>
-            <option value="">Oldest unpaid month first</option>
-            {charge && <option value={charge.id}>{fmtMonth(charge.month)} only (overflow goes to other months)</option>}
-          </select>
-        </Field>
+        {charge ? (
+          <Field label="Rent for month">
+            <select name="chargeId" className="input" defaultValue={charge.id}>
+              <option value="">Oldest unpaid month first</option>
+              <option value={charge.id}>{fmtMonth(charge.month)} only (overflow goes to other months)</option>
+            </select>
+          </Field>
+        ) : (
+          <Field label="Rent for month">
+            <input name="forMonth" type="month" className="input" defaultValue={todayStr().slice(0, 7)} />
+          </Field>
+        )}
         <Field label="Received into account"><input name="receivedIntoAccount" className="input" placeholder="e.g. SBI ••1234 / cash box" /></Field>
         <Field label="Note"><input name="note" className="input" /></Field>
       </ActionForm>
