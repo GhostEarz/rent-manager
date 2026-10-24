@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { checkInAction } from "@/actions/tenants";
+import { checkInAction, moveOutAction, transferAction, updateTenancyAction } from "@/actions/tenants";
 import { cancelStayAction } from "@/actions/stays";
 import { ActionForm, ConfirmAction } from "@/components/ActionForm";
-import { PaymentDialog } from "@/components/forms";
+import { PaymentDialog, TenantDialog } from "@/components/forms";
 import { Modal } from "@/components/Modal";
 import { MonthCalendar } from "@/components/MonthCalendar";
 import { ArriveStayButton, CheckInStayDialog, CheckOutStayDialog, StayPaymentDialog } from "@/components/StayForms";
@@ -116,22 +116,91 @@ export default async function RoomPage({
   // Monthly room
   const [options, unhoused] = await Promise.all([Q.activeTenancyOptions(user, room.houseId), Q.tenantsWithoutRoom(user, room.houseId)]);
   const mine = options.find((o: any) => o.id === room.tenancyId);
+  const admin = user.role === "OWNER";
+  const detail = room.tenantId ? await Q.tenantDetail(user, room.tenantId) : null;
+  const tenant = detail?.tenant;
+  const active = detail?.tenancies.find((y: any) => y.id === room.tenancyId);
+  const vacant = active ? (await Q.vacantRooms(user, room.houseId)).filter((r: any) => r.id !== room.id) : [];
   return (
     <>
       {header}
       {back}
       <div className="card mb-4 space-y-3">
         <p className="text-2xl font-semibold">{rupees(room.currentRent)}<span className="text-sm font-normal text-muted"> / month</span></p>
-        {room.tenancyId && room.tenantId ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs text-muted">Current tenant</p>
-              <Link href={`/tenants/${room.tenantId}`} className="text-lg font-semibold hover:underline">{room.tenantName}</Link>
-              {mine && <p className={`text-sm ${mine.due > 0 ? "text-red-600" : "text-muted"}`}>{mine.due > 0 ? `Owes ${rupees(mine.due)}` : "Rent up to date"}</p>}
+        {room.tenancyId && room.tenantId && tenant && active ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs text-muted">Current tenant</p>
+                <Link href={`/tenants/${room.tenantId}`} className="text-lg font-semibold hover:underline">{room.tenantName}</Link>
+                {mine && <p className={`text-sm ${mine.due > 0 ? "text-red-600" : "text-muted"}`}>{mine.due > 0 ? `Owes ${rupees(mine.due)}` : "Rent up to date"}</p>}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <PaymentDialog options={options as never} tenancyId={room.tenancyId} />
+                <TenantDialog tenant={tenant} label="Edit tenant" />
+                <Link href={`/tenants/${room.tenantId}`} className="btn">Full history</Link>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <PaymentDialog options={options as never} tenancyId={room.tenancyId} />
-              <Link href={`/tenants/${room.tenantId}`} className="btn">Tenant details</Link>
+
+            <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+              <div><dt className="text-xs text-muted">Phone</dt><dd>{tenant.phone ? <a href={`tel:${tenant.phone}`} className="text-indigo-600 hover:underline dark:text-indigo-400">{tenant.phone}</a> : "—"}</dd></div>
+              <div><dt className="text-xs text-muted">Email</dt><dd>{tenant.email || "—"}</dd></div>
+              <div><dt className="text-xs text-muted">ID proof</dt><dd>{tenant.idProofType ? `${tenant.idProofType} ${tenant.idProofNumber ?? ""}` : "—"}</dd></div>
+              <div><dt className="text-xs text-muted">Emergency contact</dt><dd>{tenant.emergencyContact || "—"}</dd></div>
+              <div className="sm:col-span-2"><dt className="text-xs text-muted">Address</dt><dd>{tenant.address || "—"}</dd></div>
+              {tenant.docUrl && <div><dt className="text-xs text-muted">Document</dt><dd><a href={tenant.docUrl} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline dark:text-indigo-400">Open link</a></dd></div>}
+              {tenant.notes && <div className="sm:col-span-2"><dt className="text-xs text-muted">Notes</dt><dd>{tenant.notes}</dd></div>}
+            </dl>
+
+            <div className="rounded-lg border border-black/10 p-3 text-sm dark:border-white/10">
+              <p className="text-xs text-muted">Tenancy</p>
+              <p className="font-medium">{rupees(active.monthlyRent)}/month · {active.rentOverride ? "custom rent" : "follows room rent"}</p>
+              <p className="text-muted">Since {fmtDate(active.startDate)} · Deposit {rupees(active.securityDeposit)}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {admin && (
+                  <Modal trigger="Edit rent / deposit" title="Edit tenancy">
+                    <ActionForm action={updateTenancyAction}>
+                      <input type="hidden" name="id" value={active.id} />
+                      <Row>
+                        <Field label="Monthly rent (₹)"><input name="monthlyRent" type="number" min={0} required defaultValue={active.monthlyRent} className="input" /></Field>
+                        <Field label="Security deposit (₹)"><input name="securityDeposit" type="number" min={0} required defaultValue={active.securityDeposit} className="input" /></Field>
+                      </Row>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" name="rentOverride" defaultChecked={active.rentOverride} /> Use this rent instead of following the room&apos;s rent
+                      </label>
+                      <p className="text-xs text-muted">Only affects months not yet charged.</p>
+                    </ActionForm>
+                  </Modal>
+                )}
+                <Modal trigger="Transfer room" title="Transfer to another room">
+                  <ActionForm action={transferAction} submit="Transfer">
+                    <input type="hidden" name="tenancyId" value={active.id} />
+                    <Field label="New room">
+                      <select name="roomId" required className="input" defaultValue="">
+                        <option value="" disabled>Select vacant room…</option>
+                        {vacant.map((r: any) => <option key={r.id} value={r.id}>Room {r.number} ({rupees(r.currentRent)})</option>)}
+                      </select>
+                    </Field>
+                    <Row>
+                      <Field label="Transfer date"><input name="date" type="date" required defaultValue={todayStr()} className="input" /></Field>
+                      <Field label="Custom rent (optional)"><input name="rent" type="number" min={0} className="input" placeholder="room rent" /></Field>
+                    </Row>
+                  </ActionForm>
+                </Modal>
+                <Modal trigger="Move out" title="Move out tenant" variant="danger">
+                  <ActionForm action={moveOutAction} submit="Confirm move-out" danger>
+                    <input type="hidden" name="tenancyId" value={active.id} />
+                    <p className="text-sm text-muted">
+                      Current balance: <b>{detail!.balance > 0 ? `${rupees(detail!.balance)} due` : detail!.balance < 0 ? `${rupees(-detail!.balance)} credit` : "settled"}</b>.
+                      Deposit held: <b>{rupees(active.securityDeposit)}</b>. The final month is pro-rated if enabled in Settings.
+                    </p>
+                    <Row>
+                      <Field label="Move-out date"><input name="endDate" type="date" required defaultValue={todayStr()} className="input" /></Field>
+                      <Field label="Deposit returned (₹)"><input name="depositReturned" type="number" min={0} max={active.securityDeposit} required defaultValue={active.securityDeposit} className="input" /></Field>
+                    </Row>
+                  </ActionForm>
+                </Modal>
+              </div>
             </div>
           </div>
         ) : room.status === "MAINTENANCE" ? (
@@ -139,26 +208,28 @@ export default async function RoomPage({
         ) : (
           <div className="space-y-2">
             <p className="text-sm text-muted">Vacant — no tenant right now.</p>
-            {unhoused.length === 0 ? (
-              <p className="text-sm">Add a tenant first (<Link className="text-indigo-600 underline" href="/tenants">Tenants</Link>), then move them in here.</p>
-            ) : (
-              <Modal trigger="Move a tenant in" title={`Move in — room ${room.number}`} variant="primary">
-                <ActionForm action={checkInAction} submit="Move in">
-                  <input type="hidden" name="roomId" value={room.id} />
-                  <Field label="Tenant">
-                    <select name="tenantId" required className="input" defaultValue="">
-                      <option value="" disabled>Select…</option>
-                      {unhoused.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                  </Field>
-                  <Row>
-                    <Field label="Move-in date"><input name="startDate" type="date" required defaultValue={todayStr()} className="input" /></Field>
-                    <Field label="Security deposit (₹)"><input name="securityDeposit" type="number" min={0} required defaultValue={0} className="input" /></Field>
-                  </Row>
-                  <Field label="Custom rent (optional)"><input name="rent" type="number" min={0} className="input" placeholder={`Room rent ${room.currentRent}`} /></Field>
-                </ActionForm>
-              </Modal>
-            )}
+            <div className="flex flex-wrap gap-2">
+              <TenantDialog label="Add new tenant" houses={[{ id: room.houseId, name: room.houseName }]} />
+              {unhoused.length > 0 && (
+                <Modal trigger="Move a tenant in" title={`Move in — room ${room.number}`} variant="primary">
+                  <ActionForm action={checkInAction} submit="Move in">
+                    <input type="hidden" name="roomId" value={room.id} />
+                    <Field label="Tenant">
+                      <select name="tenantId" required className="input" defaultValue="">
+                        <option value="" disabled>Select…</option>
+                        {unhoused.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </Field>
+                    <Row>
+                      <Field label="Move-in date"><input name="startDate" type="date" required defaultValue={todayStr()} className="input" /></Field>
+                      <Field label="Security deposit (₹)"><input name="securityDeposit" type="number" min={0} required defaultValue={0} className="input" /></Field>
+                    </Row>
+                    <Field label="Custom rent (optional)"><input name="rent" type="number" min={0} className="input" placeholder={`Room rent ${room.currentRent}`} /></Field>
+                  </ActionForm>
+                </Modal>
+              )}
+            </div>
+            {unhoused.length === 0 && <p className="text-xs text-muted">Add a tenant, then move them in here.</p>}
           </div>
         )}
       </div>
