@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { changeRentAction, changeRentalTypeAction, deleteRoomAndLeaveAction, updateRoomAction } from "@/actions/rooms";
 import { checkInAction, moveOutAction, transferAction, updateTenancyAction } from "@/actions/tenants";
 import { cancelStayAction } from "@/actions/stays";
 import { ActionForm, ConfirmAction } from "@/components/ActionForm";
@@ -28,10 +29,69 @@ export default async function RoomPage({
   const room = rooms.find((r) => r.id === roomId);
   if (!room) notFound();
   const history = await Q.roomRentHistory(user, roomId);
+  const admin = user.role === "OWNER";
+  const floors = await Q.listFloors(user, room.houseId);
   const unit = room.rentalType === "DAILY" ? "night" : "month";
 
+  const RoomActions = () => (
+    <>
+      <Modal trigger="Edit room" title={`Edit room ${room.number}`}>
+        <ActionForm action={updateRoomAction}>
+          <input type="hidden" name="id" value={room.id} />
+          <Row>
+            <Field label="Room number"><input name="number" required defaultValue={room.number} className="input" /></Field>
+            <Field label="Floor">
+              <select name="floorId" defaultValue={room.floorId} className="input">{floors.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+            </Field>
+          </Row>
+          <Field label="Status">
+            <select name="status" defaultValue={room.status === "MAINTENANCE" ? "MAINTENANCE" : "VACANT"} disabled={room.status === "OCCUPIED"} className="input">
+              <option value="VACANT">Available</option>
+              <option value="MAINTENANCE">Under maintenance</option>
+            </select>
+          </Field>
+          {room.status === "OCCUPIED" && <input type="hidden" name="status" value="OCCUPIED" />}
+          <Field label="Notes"><input name="notes" defaultValue={room.notes ?? ""} className="input" /></Field>
+        </ActionForm>
+      </Modal>
+      {admin && (
+        <Modal trigger="Change rent" title={`Change rent — room ${room.number}`}>
+          <ActionForm action={changeRentAction}>
+            <input type="hidden" name="id" value={room.id} />
+            <p className="text-xs text-muted">Past months keep their old rent. Tenants who were not given a custom rent follow this change from the effective date.</p>
+            <Row>
+              <Field label={`New rent (₹ / ${unit})`}><input name="rent" type="number" min={1} required defaultValue={room.currentRent} className="input" /></Field>
+              <Field label="Effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
+            </Row>
+          </ActionForm>
+        </Modal>
+      )}
+      {admin && room.status === "VACANT" && (
+        <Modal trigger="Change rental type" title={`Change rental type — room ${room.number}`}>
+          <ActionForm action={changeRentalTypeAction}>
+            <input type="hidden" name="id" value={room.id} />
+            <p className="text-xs text-muted">Only allowed while the room is vacant. Past tenancy/stay records keep their original type and rate.</p>
+            <Row>
+              <Field label="Rental type">
+                <select name="rentalType" className="input" defaultValue={room.rentalType}>
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="DAILY">Daily</option>
+                </select>
+              </Field>
+              <Field label="New rate (₹)"><input name="rent" type="number" min={1} required defaultValue={room.currentRent} className="input" /></Field>
+            </Row>
+            <Field label="Effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
+          </ActionForm>
+        </Modal>
+      )}
+      {admin && !room.tenancyId && (
+        <ConfirmAction action={deleteRoomAndLeaveAction} fields={{ id: room.id, houseId: room.houseId }} label="Delete" confirm={`Delete room ${room.number}?`} />
+      )}
+    </>
+  );
   const header = (
     <PageHeader title={`Room ${room.number}`} sub={`${room.houseName} · ${room.floorName}`}>
+      <RoomActions />
       <Badge v={room.status} />
       <Badge v={room.rentalType === "DAILY" ? "OCCUPIED" : "ACTIVE"}>{room.rentalType === "DAILY" ? "Daily" : "Monthly"}</Badge>
     </PageHeader>
@@ -116,7 +176,6 @@ export default async function RoomPage({
   // Monthly room
   const [options, unhoused] = await Promise.all([Q.activeTenancyOptions(user, room.houseId), Q.tenantsWithoutRoom(user, room.houseId)]);
   const mine = options.find((o: any) => o.id === room.tenancyId);
-  const admin = user.role === "OWNER";
   const detail = room.tenantId ? await Q.tenantDetail(user, room.tenantId) : null;
   const tenant = detail?.tenant;
   const active = detail?.tenancies.find((y: any) => y.id === room.tenancyId);
