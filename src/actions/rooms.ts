@@ -42,6 +42,20 @@ export async function updateRoomAction(_: unknown, fd: FormData) {
     await rooms.updateRoom(u, v.id, v);
   });
 }
+/** One-dialog edit: details always; rent / rental type too when the caller is an owner and they changed. */
+export async function saveRoomAction(_: unknown, fd: FormData) {
+  return run(async () => {
+    const u = await requireUser();
+    const v = z.object({ id, number: str, floorId: id, notes: optStr, status: z.enum(["VACANT", "MAINTENANCE", "OCCUPIED"]) }).parse(obj(fd));
+    await rooms.updateRoom(u, v.id, v);
+    if (u.role !== "OWNER" || !fd.get("rent")) return;
+    const p = z.object({
+      rent: posInt, effectiveFrom: date, rentalType: z.enum(["MONTHLY", "DAILY"]), currentRent: int, currentType: z.enum(["MONTHLY", "DAILY"]),
+    }).parse(obj(fd));
+    if (p.rentalType !== p.currentType) await rooms.changeRentalType(u, v.id, { rentalType: p.rentalType, rent: p.rent, effectiveFrom: p.effectiveFrom });
+    else if (p.rent !== p.currentRent) await rooms.changeRoomRent(u, v.id, p.rent, p.effectiveFrom);
+  });
+}
 export async function deleteRoomAction(_: unknown, fd: FormData) {
   return run(async () => {
     const u = await requireOwner();

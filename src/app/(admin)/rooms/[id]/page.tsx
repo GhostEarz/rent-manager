@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { changeRentAction, changeRentalTypeAction, deleteRoomAndLeaveAction, updateRoomAction } from "@/actions/rooms";
+import { deleteRoomAndLeaveAction, saveRoomAction } from "@/actions/rooms";
 import { checkInAction, moveOutAction, transferAction, updateTenancyAction } from "@/actions/tenants";
 import { cancelStayAction } from "@/actions/stays";
 import { ActionForm, ConfirmAction } from "@/components/ActionForm";
@@ -35,8 +35,8 @@ export default async function RoomPage({
 
   const RoomActions = () => (
     <Modal trigger="Edit" title={`Edit room ${room.number}`}>
-      <div className="space-y-5">
-        <ActionForm action={updateRoomAction} submit="Save details">
+      <div className="space-y-4">
+        <ActionForm action={saveRoomAction} submit="Save">
           <input type="hidden" name="id" value={room.id} />
           <Row>
             <Field label="Room number"><input name="number" required defaultValue={room.number} className="input" /></Field>
@@ -51,45 +51,37 @@ export default async function RoomPage({
             </select>
           </Field>
           {room.status === "OCCUPIED" && <input type="hidden" name="status" value="OCCUPIED" />}
-          <Field label="Notes"><input name="notes" defaultValue={room.notes ?? ""} className="input" /></Field>
-        </ActionForm>
-        {admin && (
-          <section className="space-y-2 border-t border-black/10 pt-4 dark:border-white/10">
-            <h3 className="text-sm font-semibold">Rent</h3>
-            <ActionForm action={changeRentAction} submit="Update rent">
-              <input type="hidden" name="id" value={room.id} />
-              <p className="text-xs text-muted">Past months keep their old rent. Tenants who were not given a custom rent follow this change from the effective date.</p>
-              <Row>
-                <Field label={`New rent (₹ / ${unit})`}><input name="rent" type="number" min={1} required defaultValue={room.currentRent} className="input" /></Field>
-                <Field label="Effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
-              </Row>
-            </ActionForm>
-          </section>
-        )}
-        {admin && room.status === "VACANT" && (
-          <section className="space-y-2 border-t border-black/10 pt-4 dark:border-white/10">
-            <h3 className="text-sm font-semibold">Rental type</h3>
-            <ActionForm action={changeRentalTypeAction} submit="Change rental type">
-              <input type="hidden" name="id" value={room.id} />
-              <p className="text-xs text-muted">Only allowed while the room is vacant. Past tenancy/stay records keep their original type and rate.</p>
+          {admin && (
+            <>
+              <input type="hidden" name="currentRent" value={room.currentRent} />
+              <input type="hidden" name="currentType" value={room.rentalType} />
               <Row>
                 <Field label="Rental type">
-                  <select name="rentalType" className="input" defaultValue={room.rentalType}>
-                    <option value="MONTHLY">Monthly</option>
-                    <option value="DAILY">Daily</option>
-                  </select>
+                  {room.status === "VACANT" ? (
+                    <select name="rentalType" className="input" defaultValue={room.rentalType}>
+                      <option value="MONTHLY">Monthly</option>
+                      <option value="DAILY">Daily</option>
+                    </select>
+                  ) : (
+                    <>
+                      <input type="hidden" name="rentalType" value={room.rentalType} />
+                      <input className="input" disabled value={room.rentalType === "DAILY" ? "Daily" : "Monthly"} />
+                    </>
+                  )}
                 </Field>
-                <Field label="New rate (₹)"><input name="rent" type="number" min={1} required defaultValue={room.currentRent} className="input" /></Field>
+                <Field label={`Rent (₹ / ${unit})`}><input name="rent" type="number" min={1} required defaultValue={room.currentRent} className="input" /></Field>
               </Row>
-              <Field label="Effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
-            </ActionForm>
-          </section>
-        )}
+              <Field label="Rent / type effective from"><input name="effectiveFrom" type="date" required defaultValue={todayStr()} className="input" /></Field>
+              <p className="text-xs text-muted">Past months keep their old rent. Rental type can only change while the room is vacant.</p>
+            </>
+          )}
+          <Field label="Notes"><input name="notes" defaultValue={room.notes ?? ""} className="input" /></Field>
+        </ActionForm>
         {admin && !room.tenancyId && (
-          <section className="space-y-2 border-t border-black/10 pt-4 dark:border-white/10">
-            <h3 className="text-sm font-semibold text-red-600">Danger zone</h3>
+          <div className="flex items-center justify-between border-t border-black/10 pt-3 dark:border-white/10">
+            <span className="text-sm text-muted">Remove this room permanently</span>
             <ConfirmAction action={deleteRoomAndLeaveAction} fields={{ id: room.id, houseId: room.houseId }} label="Delete room" confirm={`Delete room ${room.number}?`} />
-          </section>
+          </div>
         )}
       </div>
     </Modal>
