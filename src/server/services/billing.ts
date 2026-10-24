@@ -105,6 +105,8 @@ export interface PaymentInput {
   paidOn: string;
   method: PayMethod;
   chargeId?: number | null;
+  /** Month (YYYY-MM) the rent is for; used when no chargeId is given. */
+  forMonth?: string | null;
   referenceNo?: string | null;
   receivedIntoAccount?: string | null;
   note?: string | null;
@@ -116,11 +118,16 @@ export async function recordPayment(actor: Actor, input: PaymentInput) {
   const db = await getDb();
   return db.transaction(async (m) => {
     await tenancyFor(m, actor, input.tenancyId);
-    const { chargeId, ...rest } = input;
+    const { chargeId: pickedCharge, forMonth, ...rest } = input;
+    let chargeId = pickedCharge;
+    if (!chargeId && forMonth) {
+      const [c] = await m.query(`SELECT id FROM rent_charges WHERE "tenancyId" = $1 AND month = $2`, [input.tenancyId, forMonth]);
+      chargeId = c?.id ?? null; // no charge yet (future month): falls back to oldest-first / advance credit
+    }
     const res = await m.getRepository(Payment).insert({ ...rest, recordedById: actor.id });
     const id = res.identifiers[0].id as number;
     await applyCredit(m, input.tenancyId, chargeId);
-    await audit(m, actor, "CREATE", "Payment", id, null, input);
+    await audit(m, actor, "CREATE", "Payment", id, null, { ...input, chargeId });
     return id;
   });
 }

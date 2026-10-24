@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { run } from "@/lib/action";
 import { requireOwner, requireUser } from "@/lib/session";
-import { date, id, method, obj, optInt, optStr, posInt } from "@/lib/validators";
+import { date, id, method, month, obj, optInt, optStr, posInt } from "@/lib/validators";
 import { deletePayment, recordPayment } from "@/server/services/billing";
 
 export async function recordPaymentAction(_: unknown, fd: FormData) {
@@ -10,7 +10,7 @@ export async function recordPaymentAction(_: unknown, fd: FormData) {
     const u = await requireUser();
     const v = z
       .object({
-        tenancyId: id, amount: posInt, paidOn: date, method, chargeId: optInt,
+        tenancyId: id, amount: posInt, paidOn: date, method, chargeId: optInt, forMonth: z.preprocess((v) => (v === "" ? undefined : v), month.optional()),
         referenceNo: optStr, receivedIntoAccount: optStr, note: optStr,
       })
       .parse(obj(fd));
